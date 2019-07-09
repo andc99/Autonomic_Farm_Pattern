@@ -17,7 +17,3 @@ The pattern should be tested providing a collection of tasks such that the tasks
 final part all require a different average time to be computed (e.g. 4L in the first part, L in the second part
 and 8L in the third part) and the task collection execution time is considerably longer than the time needed
 to reconfigure the farm.
-Free choice pattern
-Students may propose any pattern of interest to be implemented, but the pattern must be agreed with
-the professor. After agreeing the pattern subject the work to be performed is the one listed for the two
-assigned patterns.
