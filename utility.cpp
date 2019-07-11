@@ -43,12 +43,9 @@ int main(){
 	std::thread* thread_core;
 //	thread_core = new std::thread(body, 1);
 	int i = 0;
-	int id = 0;
-	Worker<int,int> w(id, body_2);
-	w.push(22);
-	w.run();
-	std::cout << w.get_id() << std::endl;
-	std::cout << w.get_context() << std::endl;
+	SafeQueue<int>* in;
+	SafeQueue<int>* out;
+	Autonomic_Farm<int,int> aut_farm(body_2, 4, 4);
 //	std::cout << "Start" << std::endl;
 //	while(true){
 //		std::cout << "run " << std::endl;
