@@ -16,8 +16,9 @@ long service_time_farm(long emitter, long collector, long worker, int nw){
 	return std::max({emitter, collector, worker/nw});
 }
 
-void body_2(int task){ //non una classe per evitare di appesantire 
+int body_2(int task){ //non una classe per evitare di appesantire 
 	std::cout << "task: " << task << std::endl;
+	return task;
 }
 
 void body(int id_thread){ //non una classe per evitare di appesantire 
@@ -43,10 +44,11 @@ int main(){
 //	thread_core = new std::thread(body, 1);
 	int i = 0;
 	int id = 0;
-	Worker<int> w(id, body_2);
+	Worker<int,int> w(id, body_2);
 	w.push(22);
 	w.run();
 	std::cout << w.get_id() << std::endl;
+	std::cout << w.get_context() << std::endl;
 //	std::cout << "Start" << std::endl;
 //	while(true){
 //		std::cout << "run " << std::endl;
