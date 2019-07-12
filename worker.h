@@ -6,179 +6,157 @@
 #define EOS -1
 
 //invece di eliminare un worker, basta metterlo 1 su un core dove c'è già un altro core
-
-class ProcessingElement: public std::thread{
+class ProcessingElement{
 	protected:
-		std::thread* thread;
-			
-};
-
-template<class I, class O> class Worker{
-	private:
 		int thread_id;
-		std::thread* thread;		
-		std::function<I(O)> body;
-		SafeQueue<I>* in_queue;
-		SafeQueue<O>* out_queue;
-		//std::function<void(int)> body;
-	public:
-		Worker(std::function<I(O)> body, SafeQueue<I>* in_queue, SafeQueue<O>* out_queue){
+		std::thread* thread;
+		bool sticky;
+
+		ProcessingElement(bool sticky){
 			static std::atomic<int> id{0};
 			this->thread_id = id++;
-			std::cout << "Worker_id " << thread_id << std::endl;
-			this->body = body;
-			this->in_queue = in_queue;
-			this->out_queue = out_queue;
+			std::cout << "PE_id: " << thread_id << std::endl;	
+			this->sticky = sticky;
 		}
-	
+
+		virtual void run() = 0;
+	public:		
+		int get_context(){
+			return sched_getcpu();	
+		}
 
 		int get_id(){
 			return this->thread_id;
 		}
 	
-		int get_context(){
-			return sched_getcpu();	
-		}
-	
 		void join(){
 			this->thread->join();
+			return;
 		}
-	
-		void run(){
-			this->thread = new std::thread([=] {   //passare puntatori dei task come in FF!!!!
-						I task;
-						while( (task = this->in_queue->safe_pop()) != EOS){	
-							O res = body(task);
-							this->out_queue->safe_push(res);
-						}
-						this->out_queue->safe_push(EOS);
-						return;
-					}
-				); //Se task is -1 retur
-			return; //mettere già qua la join?
-		}
-	
+
 		int move_to_context(int id_context){
 			cpu_set_t cpuset;
 			CPU_ZERO(&cpuset);
-			CPU_SET(id_context, &cpuset);
-			int error = pthread_setaffinity_np((this->*thread).native_handle(), sizeof(cpu_set_t), &cpuset);
+			CPU_SET(id_context%std::thread::hardware_concurrency(), &cpuset);
+			int error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 			if (error != 0)
 				std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
 			return error;
 		}
-
 };
 
 
-template<class T> class Emitter{ //fare una sorta di superclasse (gestire intelligentemente i body diversi che condivide move_to_context ecc
+//Se gli eleem della farm sono coerenti, non importa fare I e O
+template<class I, class O> class Worker: public ProcessingElement{
+	private:
+		std::function<I(O)> body;
+		SafeQueue<I>* in_queue;
+		SafeQueue<O>* out_queue;
+	public:
+		Worker(std::function<I(O)> body, SafeQueue<I>* in_queue, SafeQueue<O>* out_queue, bool sticky) :ProcessingElement(sticky){
+			this->body = body;
+			this->in_queue = in_queue;
+			this->out_queue = out_queue;
+		}
+	
+		void run(){
+			//passare puntatori dei task come in FF!!!!
+			this->thread = new std::thread([&] {
+					I task;
+					while( (task = this->in_queue->safe_pop()) != EOS)	
+						this->out_queue->safe_push(body(task));	
+					this->out_queue->safe_push(EOS);
+					return;
+				}); 
+			move_to_context(this->get_id());
+			std::cout << "thread_id " << this->get_id() << " context: " << this->get_context() << std::endl;
+			return; 
+		}
+};
+
+//la safe _try lock non sarebbe malissimo
+//funzione emitter con possibilità di specificare la policy per la distribuzione dei task
+template<class T> class Emitter: public ProcessingElement{ 
 	private:
 		int nw; //magari dovrebbe essere atomic int o altro. Se prendo la size delle vect_queue non mi serve
-		std::thread* thread;
 		SafeQueue<T>* in_queue;
 		std::vector<SafeQueue<T>*>* out_queues; //ci sarà da sincronizzare il puntatore per la lista di queue
-		//funzione emitter con possibilità di specificare la policy per la distribuzione dei task
 
 
 	public:
-		Emitter(SafeQueue<T>* in_queue, std::vector<SafeQueue<T>*>* out_queues){
+		Emitter(SafeQueue<T>* in_queue, std::vector<SafeQueue<T>*>* out_queues, bool sticky):ProcessingElement(sticky){
 			this->in_queue = in_queue;
 			this->out_queues = out_queues;
-			std::cout << "Emitter" << std::endl;
 		}
 
 		void run(){
 			this->thread = new std::thread([&] {
-				T task;
-				int id_worker{0};
-				while( (task = this->in_queue->safe_pop()) != EOS){
-					(*out_queues)[id_worker]->safe_push(task);	
-					id_worker = (++id_worker)%this->out_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_worker diventi un long e dare errori
-					//std::cout << "Emitter id_worker queue: " << id_worker << std::endl;
-				}
-				for(int i = 0; i < out_queues->size(); i++)
-					(*out_queues)[i]->safe_push(EOS);
-				return;
-			});
-		}
-
-		int move_to_context(int id_context){
-			cpu_set_t cpuset;
-			CPU_ZERO(&cpuset);
-			CPU_SET(id_context, &cpuset);
-			int error = pthread_setaffinity_np((this->*thread).native_handle(), sizeof(cpu_set_t), &cpuset);
-			if (error != 0)
-				std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
-			return error;
+					T task;
+					int id_worker{0};
+					while( (task = this->in_queue->safe_pop()) != EOS){
+						(*out_queues)[id_worker]->safe_push(task);	
+						id_worker = (++id_worker)%this->out_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_worker diventi un long e dare errori
+					}
+					for(int i = 0; i < out_queues->size(); i++)
+						(*out_queues)[i]->safe_push(EOS);
+					return;
+				});
+			return;
 		}
 
 };
 
-template<class T> class Collector{//se lascio la possibilità di definire il body per il collector è come se lasciassi la possibilità di rimuoverlo ehhh
+template<class T> class Collector: public ProcessingElement{
 	private:
-		std::thread* thread;
-		std::vector<SafeQueue<T>*>* in_queues; //ci sarà da sincronizzare il puntatore per la lista di queue
+		int nw;
+		std::vector<SafeQueue<T>*>* in_queues;
+		//ci sarà da sincronizzare il puntatore per la lista di queue
 		SafeQueue<T>* out_queue;
-		//funzione emitter con possibilità di specificare la policy per la distribuzione dei task
-		
+		//policy dinamica che in base al carico del thread assegna in modo diverso?
 
 	public:
-		Collector(std::vector<SafeQueue<T>*>* in_queues, SafeQueue<T>* out_queue){
+		Collector(std::vector<SafeQueue<T>*>* in_queues, SafeQueue<T>* out_queue, bool sticky):ProcessingElement(sticky){
 			this->in_queues = in_queues;
 			this->out_queue = out_queue;
-			std::cout << "Collector" << std::endl;
 		}
 
 		void run(){
 			this->thread = new std::thread([&] {
-				T task;
-				int id_worker{0};
-				while( (task = (*in_queues)[id_worker]->safe_pop()) != EOS){
-					this->out_queue->safe_push(task);	
-					id_worker = (++id_worker)%this->in_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_worker diventi un long e dare errori
-				}
-				this->out_queue->safe_push(EOS);
-				return;
-			});
+					T task;
+					int id_worker{0};
+					while( (task = (*in_queues)[id_worker]->safe_pop()) != EOS){
+						this->out_queue->safe_push(task);	
+						id_worker = (++id_worker)%this->in_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_worker diventi un long e dare errori
+					//	std::cout << "res: " << task << std::endl;
+					}
+					this->out_queue->safe_push(EOS);
+					return;
+				});
+			return;
 		}
 
-		void join(){
-			this->thread->join();
-		}
-
-		int move_to_context(int id_context){
-			cpu_set_t cpuset;
-			CPU_ZERO(&cpuset);
-			CPU_SET(id_context, &cpuset);
-			int error = pthread_setaffinity_np((this->*thread).native_handle(), sizeof(cpu_set_t), &cpuset);
-			if (error != 0)
-				std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
-			return error;
-		}
 };
 
 template<class I, class O> class Autonomic_Farm{
-	
 	private:
 		int nw, nw_max;
 		//potrei toglierli i vector di code, occupano memoria. Però dall'altra evito di fare jump sulla memoria
-		std::vector<SafeQueue<I>*> in_queues; //sarà poi nw_max
-		std::vector<SafeQueue<O>*> out_queues;	//sarà poi nw_max	
 		SafeQueue<I> in_farm_queue;
-		SafeQueue<O> out_farm_queue;
-		std::vector<Worker<I,O>*> workers;
-		std::function<I(O)> body;
 		Emitter<I>* emitter;
+		std::vector<SafeQueue<I>*> in_queues; //sarà poi nw_max
+		std::vector<Worker<I,O>*> workers;
+		std::vector<SafeQueue<O>*> out_queues;	//sarà poi nw_max	
+		SafeQueue<O> out_farm_queue;
 		Collector<O>* collector;
 
-	public: //la queue dell'emitter deve essere accedibile dall'esterno oppure passo direttamente la collection in input alla farm
-		Autonomic_Farm(std::function<I(O)> body, int nw, int nw_max){ //mette nw-nw_max in stato di ready
-			this->body = body;
+	public:
+		//mette nw-nw_max in stato di ready
+		Autonomic_Farm(std::function<I(O)> body, int nw, int nw_max, bool sticky){ 
 			unsigned num_cpus = std::thread::hardware_concurrency();	
 			this->nw = nw;
 			this->nw_max = nw_max;
-			this->emitter = new Emitter<I>(&in_farm_queue, &in_queues);
-			this->collector = new Collector<O>(&out_queues, &out_farm_queue);
+			this->emitter = new Emitter<I>(&in_farm_queue, &in_queues, sticky);
+			this->collector = new Collector<O>(&out_queues, &out_farm_queue, sticky);
 			this->in_queues.reserve(nw);
 			this->out_queues.reserve(nw);
 			SafeQueue<I>* in_queue;
@@ -187,22 +165,25 @@ template<class I, class O> class Autonomic_Farm{
 			for(int i = 0; i < nw; i++){ //sarà nw_max
 				in_queue = new SafeQueue<I>();
 				out_queue = new SafeQueue<O>();
-				w = new Worker<I,O>(body, in_queue, out_queue);
+				w = new Worker<I,O>(body, in_queue, out_queue, sticky);
 				this->in_queues.push_back(in_queue);
 				this->out_queues.push_back(out_queue);
 				this->workers.push_back(w); 
 			}	
 		}
 
+		//ID emitter e collector rispetto a workers_ID
 		void run(){
 			this->emitter->run();
 			for(int i = 0; i < this->nw; i++)
 				this->workers[i]->run();
 			this->collector->run();
+			return;
 		}
 
 		void push(I task){
 			this->in_farm_queue.safe_push(task);
+			return;
 		}
 
 		O pop(){
