@@ -17,7 +17,7 @@ long service_time_farm(long emitter, long collector, long worker, int nw){
 }
 
 int body_2(int task){ //non una classe per evitare di appesantire 
-	task;
+	task++;
 	return task;
 }
 
@@ -47,15 +47,13 @@ int main(){
 	SafeQueue<int>* out;
 	Autonomic_Farm<int,int> aut_farm(body_2, 4, 4);
 	aut_farm.run();
-	for(int i = 0; i < 10; i++){
-		//std::cout << "insert: " << i << std::endl;
+	for(int i = 1; i < 10; i++){
 		aut_farm.push(i);
 	}
 	aut_farm.push(EOS);
 	
-	int res;
-	for(int i = 0; i < 10; i++){
-		//std::cout << "removeeeee: " << res << std::endl;
+	for(int i = 1; i < 10; i++){
+		std::cout << "--> remove: " << aut_farm.pop() << std::endl;
 	}
 //	std::cout << "Start" << std::endl;
 //	while(true){

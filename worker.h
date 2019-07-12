@@ -5,6 +5,13 @@
 #include "safe_queue.h"
 #define EOS -1
 
+//invece di eliminare un worker, basta metterlo 1 su un core dove c'è già un altro core
+
+class ProcessingElement: public std::thread{
+	protected:
+		std::thread* thread;
+			
+};
 
 template<class I, class O> class Worker{
 	private:
@@ -33,21 +40,15 @@ template<class I, class O> class Worker{
 			return sched_getcpu();	
 		}
 	
-		void push(O task){
-			this->in_queue->safe_push(task);
-		}
-		
 		void join(){
 			this->thread->join();
 		}
 	
 		void run(){
-			std::cout << "o: " << out_queue << std::endl;
 			this->thread = new std::thread([=] {   //passare puntatori dei task come in FF!!!!
 						I task;
 						while( (task = this->in_queue->safe_pop()) != EOS){	
 							O res = body(task);
-							//std::cout << "O: " << res << std::endl;
 							this->out_queue->safe_push(res);
 						}
 						this->out_queue->safe_push(EOS);
@@ -132,8 +133,6 @@ template<class T> class Collector{//se lascio la possibilità di definire il bod
 			this->thread = new std::thread([&] {
 				T task;
 				int id_worker{0};
-				for(int i = 0; i < 4; i++)
-					std::cout << "--------collector-------: " << &((*in_queues)[i]) << std::endl;
 				while( (task = (*in_queues)[id_worker]->safe_pop()) != EOS){
 					this->out_queue->safe_push(task);	
 					id_worker = (++id_worker)%this->in_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_worker diventi un long e dare errori
@@ -175,6 +174,7 @@ template<class I, class O> class Autonomic_Farm{
 	public: //la queue dell'emitter deve essere accedibile dall'esterno oppure passo direttamente la collection in input alla farm
 		Autonomic_Farm(std::function<I(O)> body, int nw, int nw_max){ //mette nw-nw_max in stato di ready
 			this->body = body;
+			unsigned num_cpus = std::thread::hardware_concurrency();	
 			this->nw = nw;
 			this->nw_max = nw_max;
 			this->emitter = new Emitter<I>(&in_farm_queue, &in_queues);
@@ -199,7 +199,6 @@ template<class I, class O> class Autonomic_Farm{
 			for(int i = 0; i < this->nw; i++)
 				this->workers[i]->run();
 			this->collector->run();
-			collector->join();
 		}
 
 		void push(I task){
