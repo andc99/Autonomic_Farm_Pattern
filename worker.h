@@ -82,12 +82,14 @@ template<class I, class O> class Worker: public ProcessingElement{
 template<class T> class Emitter: public ProcessingElement{ 
 	private:
 		int nw; //magari dovrebbe essere atomic int o altro. Se prendo la size delle vect_queue non mi serve
+		std::vector<T>* collection;
 		SafeQueue<T>* in_queue;
 		std::vector<SafeQueue<T>*>* out_queues; //ci sarà da sincronizzare il puntatore per la lista di queue
 
 
 	public:
-		Emitter(SafeQueue<T>* in_queue, std::vector<SafeQueue<T>*>* out_queues, bool sticky):ProcessingElement(sticky){
+		Emitter(std::vector<T>* collection, SafeQueue<T>* in_queue, std::vector<SafeQueue<T>*>* out_queues, bool sticky):ProcessingElement(sticky){
+			this->collection = collection;
 			this->in_queue = in_queue;
 			this->out_queues = out_queues;
 		}
@@ -100,7 +102,8 @@ template<class T> class Emitter: public ProcessingElement{
 					std::cout << "Emitter " << this->get_id() << " context: " << this->get_context() << std::endl;
 					T task;
 					int id_queue{0};
-					while( (task = this->in_queue->safe_pop()) != EOS){
+					//while( (task = this->in_queue->safe_pop()) != EOS){
+					for(T task : *collection){
 						(*out_queues)[id_queue]->safe_push(task);	
 						//std::cout << "in:" << in_queue->safe_size() << std::endl;
 						id_queue = (++id_queue)%this->out_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_queue diventi un long e dare errori
@@ -152,6 +155,7 @@ template<class T> class Collector: public ProcessingElement{
 template<class I, class O> class Autonomic_Farm{
 	private:
 		int nw, nw_max;
+		std::vector<I>* collection;
 		//potrei toglierli i vector di code, occupano memoria. Però dall'altra evito di fare jump sulla memoria
 		SafeQueue<I> in_farm_queue;
 		Emitter<I>* emitter;
@@ -160,14 +164,16 @@ template<class I, class O> class Autonomic_Farm{
 		std::vector<SafeQueue<O>*> out_queues;	//sarà poi nw_max	
 		SafeQueue<O> out_farm_queue;
 		Collector<O>* collector;
+		
 
 	public:
 		//mette nw-nw_max in stato di ready
-		Autonomic_Farm(std::function<I(O)> body, int nw, int nw_max, bool sticky){ 
+		Autonomic_Farm(std::vector<I>* collection, std::function<I(O)> body, int nw, int nw_max, bool sticky){ 
 			unsigned num_cpus = std::thread::hardware_concurrency();	
+			this->collection = collection;
 			this->nw = nw;
 			this->nw_max = nw_max;
-			this->emitter = new Emitter<I>(&in_farm_queue, &in_queues, sticky);
+			this->emitter = new Emitter<I>(collection, &in_farm_queue, &in_queues, sticky);
 			this->collector = new Collector<O>(&out_queues, &out_farm_queue, sticky);
 			this->in_queues.reserve(nw);
 			this->out_queues.reserve(nw);
@@ -185,11 +191,12 @@ template<class I, class O> class Autonomic_Farm{
 		}
 
 		//ID emitter e collector rispetto a workers_ID
-		void run(){
+		void run_and_wait(){
 			this->emitter->run();
 			this->collector->run();
 			for(int i = 0; i < this->nw; i++)
 				this->workers[i]->run();
+			this->collector->join();
 			return;
 		}
 

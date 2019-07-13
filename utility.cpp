@@ -37,33 +37,37 @@ int isPrime(int x){
 	return 1;
 }
 
-std::vector<int> seq(){
-	std::vector<int> vec;
-	for(int i = 0; i < 10000; i++){
-	 	vec.push_back(isPrime(i));
+void seq(std::vector<int> collection){
+	for(int i : collection){
+	 	collection[i] = isPrime(i);
 	}
-	return vec;
+	return;
 }
 
 
-int main(){
+int main(int argc, const char** argv){
+	int n_tasks = atoi(argv[1]);	
+	int n_contexts = atoi(argv[2]);
+	bool sticky = atoi(argv[3]);	
+	std::vector<int> collection;
+	for(int i = 0; i < n_tasks; i++){
+		collection.push_back(i);
+	}
+	std::cout << sticky << std::endl;
 	high_resolution_clock::time_point start_time = high_resolution_clock::now();
-	Autonomic_Farm<int,int> aut_farm(isPrime, 2, 6, true);
-	aut_farm.run();
-	for(int i = 0; i < 100000; i++){
-		aut_farm.push(i);
-	}
-	aut_farm.push(EOS);
+	Autonomic_Farm<int,int> aut_farm(&collection, isPrime, n_contexts, 6, sticky);
+	aut_farm.run_and_wait();
 	int task;	
-	while( (task = aut_farm.pop()) != EOS){
+	//non d'accordo che poppi anche
+	//while( (task = aut_farm.pop()) != EOS){
 		//std::cout << "res: " << task << std::endl;
-	}
+	//}
 	high_resolution_clock::time_point end_time = high_resolution_clock::now();                
 	std::cout << "Tpar: " << std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count() << std::endl;
 
 	high_resolution_clock::time_point start_time_s = high_resolution_clock::now();
 	std::cout << "----" << std::endl;
-	seq();
+	seq(collection);
 	high_resolution_clock::time_point end_time_s = high_resolution_clock::now(); 
 	std::cout << "Tseq: " << std::chrono::duration_cast<std::chrono::microseconds>(end_time_s - start_time_s).count() << std::endl;
 	
