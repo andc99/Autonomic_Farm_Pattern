@@ -50,7 +50,7 @@ int main(){
 	high_resolution_clock::time_point start_time = high_resolution_clock::now();
 	Autonomic_Farm<int,int> aut_farm(isPrime, 2, 6, true);
 	aut_farm.run();
-	for(int i = 0; i < 10000; i++){
+	for(int i = 0; i < 100000; i++){
 		aut_farm.push(i);
 	}
 	aut_farm.push(EOS);
