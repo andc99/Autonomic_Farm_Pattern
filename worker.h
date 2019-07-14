@@ -13,12 +13,13 @@ class ProcessingElement{
 		int thread_id;
 		std::thread* thread;
 		bool sticky;
+		int processed;
 
 		ProcessingElement(bool sticky){
 			static std::atomic<int> id{0};
 			this->thread_id = id++;
-			std::cout << "PE_id: " << thread_id << std::endl;	
 			this->sticky = sticky;
+			this->processed = 0;
 		}
 
 		virtual void run() = 0;
@@ -34,6 +35,10 @@ class ProcessingElement{
 		void join(){
 			this->thread->join();
 			return;
+		}
+		
+		void process(){
+			std::cout << "processed: " << this->processed << std::endl;
 		}
 
 		int move_to_context(int id_context){
@@ -68,8 +73,12 @@ template<class I, class O> class Worker: public ProcessingElement{
 						move_to_context(this->get_id());
 					std::cout << "thread_id " << this->get_id() << " context: " << this->get_context() << std::endl;
 					I task;
-					while( (task = this->in_queue->safe_pop()) != EOS)	
+					while( (task = this->in_queue->safe_pop()) != EOS){	
+						this->processed++;
+					//	std::cout << this->get_id() << " - " << this->in_queue <<  std::endl;
 						this->out_queue->safe_push(body(task));	
+					}
+					this->process();
 					this->out_queue->safe_push(EOS);
 					return;
 				}); 
@@ -108,7 +117,6 @@ template<class T> class Emitter: public ProcessingElement{
 						//std::cout << "in:" << in_queue->safe_size() << std::endl;
 						id_queue = (++id_queue)%this->out_queues->size(); //c'è da sincronizzare la size in quanto è un vect. Lo riassegno per evitare che id_queue diventi un long e dare errori
 					}
-					std::cout << " EOS---- " << std::endl;
 					for(int i = 0; i < out_queues->size(); i++)
 						(*out_queues)[i]->safe_push(EOS);
 					return;
@@ -181,8 +189,8 @@ template<class I, class O> class Autonomic_Farm{
 			SafeQueue<O>* out_queue;
 			Worker<I,O>* w;
 			for(int i = 0; i < nw; i++){ //sarà nw_max
-				in_queue = new SafeQueue<I>();
-				out_queue = new SafeQueue<O>();
+				in_queue = new SafeQueue<I>(10);
+				out_queue = new SafeQueue<O>(10);
 				w = new Worker<I,O>(body, in_queue, out_queue, sticky);
 				this->in_queues.push_back(in_queue);
 				this->out_queues.push_back(out_queue);
