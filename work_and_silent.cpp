@@ -4,6 +4,7 @@
 #define EOS -1
 
 //ogni worker fa la sua queue!
+//da settare anche una dimensione??
 class ProcessingElement{
 	protected:
 		std::thread* thread;
@@ -149,7 +150,7 @@ template<class I, class O> class Autonomic_Farm_Silent{
 				worker = new Worker<I,O>(body, win_queue, wout_queue);
 				this->win_queues->push_back(win_queue);
 				this->wout_queues->push_back(wout_queue);
-				this->workers.push_back(worker);
+				this->workers.push_back(std::move(worker));
 			}
 			this->emitter = new Emitter<I>(this->win_queues, this->emitter_queue);
 			this->collector = new Collector<O>(this->wout_queues, this->collector_queue);		
