@@ -19,7 +19,7 @@ template <class T> class SafeQueue{
 		long overhead_pop = 0;
 
 	public:
-		SafeQueue(int my_size) : max_size(my_size) {};
+		SafeQueue(int my_size) : max_size(my_size) {}; //ERRORE NON INIZIALIZZO LE CONDITION
 		SafeQueue(){
 			this->max_size = std::numeric_limits<unsigned int>::max();
 			d_mutex = new std::mutex();
