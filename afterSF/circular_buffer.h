@@ -6,8 +6,9 @@
 class Circular_Buffer{
 	private:
 		void** circular_buffer;
-		unsigned int p_read = 0, p_write = 0, size;
+		unsigned int p_read = 0, p_write = 0, size = 0;
 		std::mutex* d_mutex;
+		std::mutex* v_mutex;
 		std::condition_variable* p_condition; //producer
 		std::condition_variable* c_condition; //consumer;
 

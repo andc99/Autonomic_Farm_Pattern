@@ -8,7 +8,6 @@ ProcessingElement::ProcessingElement(bool sticky){
 	if(this->sticky)	
 		move_to_context(this->get_id());
 	std::cout << "Machine Hardware Concurrency " << std::thread::hardware_concurrency << std::endl;
-	return;
 }
 
 ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
@@ -104,7 +103,7 @@ void Worker<I,O>::body(){
 		I &t = (*((I*) task));
 		O res = fun_body(t);
 		this->wout_cb->safe_push(&res); //safe_try
-		win_cb->safe_pop(&task);	
+		this->win_cb->safe_pop(&task);	
 	};
 	this->wout_cb->safe_push(EOS);
 	return;
@@ -126,10 +125,81 @@ Circular_Buffer* Worker<I,O>::get_out_queue(){
 	return this->wout_cbs;
 }
 
+/////////////////////////////////////////////////////////////////////////
+//
+//	Collector	
+//
+/////////////////////////////////////////////////////////////////////////
+
+template <typename O>
+Collector<O>::Collector(std::vector<Circular_Buffer*>* wout_cbs, bool sticky):ProcessingElement(sticky){
+	this->wout_cbs = wout_cbs;
+	this->collector_cb = new Circular_Buffer(50); ////////yyp
+}
+
+template <typename O>
+void Collector<O>::body(){
+	void* task = 0;
+	unsigned int id_queue{0};
+	(*wout_cbs)[id_queue]->safe_pop(&task);
+	while( (O*) task != EOS){ //NON SICURO FUNZIONI
+		O &t = (*((O*) task));
+		this->collector_cb->safe_push(&t); //safe_try
+		id_queue = (id_queue++)%wout_cbs->size();
+		(*wout_cbs)[id_queue]->safe_pop(&task);
+		std::cout << t <<std::endl;
+	};
+	return;
+}
+
+template <typename O>
+void Collector<O>::run(){
+	this->thread = new std::thread(&Collector<O>::body, this);
+	return;
+}
+
+template <typename O>
+Circular_Buffer* Collector<O>::get_out_queue(){
+	return this->collector_cb;
+}
 
 
 
+/////////////////////////////////////////////////////////////////////////
+//
+//	Autonomic Farm	
+//
+/////////////////////////////////////////////////////////////////////////
 
 
+template <typename I, typename O>
+Autonomic_Farm<I,O>::Autonomic_Farm(unsigned int nw,  std::function<I(O)> fun_body, bool sticky, std::vector<I>* collection){
+	this->nw = nw;
+	this->sticky = sticky;
+	this->fun_body = fun_body;
+	this->win_cbs = new std::vector<Circular_Buffer*>();
+	this->workers = new std::vector<Worker<I,O>*>();
+	this->wout_cbs = new std::vector<Circular_Buffer*>();
+	for(auto i = 0; i < nw; i++)
+		this->add_worker();
+	this->emitter = new Emitter<I>(this->win_cbs, collection, this->sticky);
+	this->collector = new Collector<O>(this->wout_cbs, this->sticky);
+}
 
+template <typename I, typename O>
+void Autonomic_Farm<I,O>::add_worker(){
+	Worker<I,O>* worker = new Worker<I,O>(this->fun_body, this->sticky);
+	this->win_cbs->push_back(worker->get_in_queue());
+	this->wout_cbs->push_back(worker->get_out_queue());
+	(*this->workers).push_back(worker);
+	return;
+}
 
+template <typename I, typename O>
+void Autonomic_Farm<I,O>::run_and_wait(){
+	this->emitter->run();
+	for(auto i = 0; i < nw; i++)
+		(*this->workers)[i]->run();
+	this->collector->run();
+	this->collector->join();
+}

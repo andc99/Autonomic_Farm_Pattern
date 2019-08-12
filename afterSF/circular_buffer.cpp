@@ -1,4 +1,5 @@
 #include "circular_buffer.h"
+#include <iostream>
 
 void Circular_Buffer::init(){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
@@ -48,6 +49,7 @@ bool Circular_Buffer::safe_pop(void** task){
 	*task = this->circular_buffer[this->p_read];
 	this->circular_buffer[this->p_read] = NULL;
 	this->p_read = (this->p_read == this->size - 1) ? 0 : this->p_read + 1;
+	//std::cout << "write: " << p_write << " read: " << p_read << std::endl;
 	this->p_condition->notify_one();
 	return true;
 }

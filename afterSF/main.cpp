@@ -4,7 +4,7 @@
 #include <iostream>
 #include <math.h>
 #include <vector>
-
+#include <functional>
 
 #include "autonomic_farm.h"
 
@@ -15,7 +15,9 @@
 //ogni volta che creo la farm, deve prendere il massimo numero di contesti e fare in modulo quello 
 //per assegnarlo ai core
 //
-int isPrime(int x){
+
+//giustificare ubounded vs bounded queue
+unsigned int isPrime(unsigned int x){
 	if(x==2)
 		return 1;
 	if(x%2==0)
@@ -29,9 +31,11 @@ int isPrime(int x){
 	return 1;
 }
 
-template <class T>
-long parallel(std::vector<T>* collection){
+template <class I, class O>
+long parallel(unsigned int n_threads, std::function<I(O)> fun_body, bool sticky, std::vector<I>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
+	Autonomic_Farm<I,O> afs(n_threads, fun_body, sticky, collection);
+	afs.run_and_wait();
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }
@@ -53,39 +57,26 @@ int main(int argc, const char** argv){
 		return 1;
 	}
 
-	int n_tasks = atoi(argv[1]);
-	int n_threads = atoi(argv[2]);
+	unsigned int n_tasks = atoi(argv[1]);
+	unsigned int n_threads = atoi(argv[2]);
 	bool sticky = atoi(argv[3]);
 
-	
 	long seq_time, par_time;
-	std::vector<int> collection;
+	std::vector<unsigned int> collection;
 	std::cout << "---- Preparing Collection ----" << std::endl;
-	for(int i = 0; i < n_tasks; i++)
-		collection.push_back(std::numeric_limits<int>::max());
+	for(unsigned int i = 1; i < n_tasks+1; i++)
+		collection.push_back(i);
+		//collection.push_back(std::numeric_limits<int>::max());
 
-//	Circular_Buffer cb(30);
-//	std::cout << "size " << cb.safe_get_size() << std::endl;
-//	cb.safe_resize(20);
-//	std::cout << "size " << cb.safe_get_size() << std::endl;
-
-//	for(auto i = 0; i < collection.size(); i++){
-//		int &task = collection[i];
-//		cb.safe_push(&task);
-//	}
-	
-//	void* task;
-//	for(auto i = 0; i < collection.size(); i++){
-//		cb.safe_pop(&task);
-//		std::cout << *((int*) task) << std::endl; 
-//	}
 
 	std::cout << "---- Computing ----" << std::endl;
-	par_time = parallel(&collection);
-	seq_time = sequential(&collection);
+	par_time = parallel<unsigned int, unsigned int>(n_threads, isPrime, sticky, &collection);
+	seq_time = sequential<unsigned int>(&collection);
 
 	std::cout << "Par_TIME: " << par_time << std::endl;
 	std::cout << "Seq_TIME: " << seq_time << std::endl;
 
 	return 0;
 }
+
+
