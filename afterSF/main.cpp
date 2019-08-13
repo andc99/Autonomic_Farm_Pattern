@@ -17,7 +17,10 @@
 //
 
 //giustificare ubounded vs bounded queue
-unsigned int isPrime(unsigned int x){
+//size_t giustificare-->per generalizzare
+//fare il check nella farm che i valori non siano negativi
+//
+int isPrime(int x){
 	if(x==2)
 		return 1;
 	if(x%2==0)
@@ -28,6 +31,8 @@ unsigned int isPrime(unsigned int x){
 			return 0;
 		i++;
 	}
+	
+    //	std::this_thread::sleep_for (std::chrono::seconds(1));
 	return 1;
 }
 
@@ -43,9 +48,8 @@ long parallel(unsigned int n_threads, std::function<I(O)> fun_body, bool sticky,
 template <class T>
 long sequential(std::vector<T>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
-	for(T task : *collection){
-		isPrime(task);
-	}
+	for(auto i = 0; i < (*collection).size(); i++)
+		(*collection)[i] = isPrime((*collection)[i]);
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }
@@ -57,22 +61,33 @@ int main(int argc, const char** argv){
 		return 1;
 	}
 
-	unsigned int n_tasks = atoi(argv[1]);
-	unsigned int n_threads = atoi(argv[2]);
+	size_t n_tasks = std::stoul(argv[1]); //string to unsigned int
+	size_t n_threads = std::stoul(argv[2]);
+	std::cout << n_tasks << " " << n_threads << std::endl;
 	bool sticky = atoi(argv[3]);
 
 	long seq_time, par_time;
-	std::vector<unsigned int> collection;
+	std::vector<size_t> collection_par, collection_seq;
 	std::cout << "---- Preparing Collection ----" << std::endl;
-	for(unsigned int i = 1; i < n_tasks+1; i++)
-		collection.push_back(i);
+	for(size_t i = 1; i < n_tasks+1; i++){
+		collection_seq.push_back(std::numeric_limits<int>::max());
+		collection_par.push_back(std::numeric_limits<int>::max());
+	}
 		//collection.push_back(std::numeric_limits<int>::max());
 
-
 	std::cout << "---- Computing ----" << std::endl;
-	par_time = parallel<unsigned int, unsigned int>(n_threads, isPrime, sticky, &collection);
-	seq_time = sequential<unsigned int>(&collection);
+	par_time = parallel<size_t, size_t>(n_threads, isPrime, sticky, &collection_par);
+	
+	seq_time = sequential<size_t>(&collection_seq);
 
+/*	for(auto i : collection_par)
+		std::cout << i << std::endl;
+	
+	std::cout << "----  ----" << std::endl;
+	for(auto i : collection_seq)
+		std::cout << i << std::endl;
+*/
+	std::cout << "Are Equal? " << (collection_par == collection_seq) << std::endl;
 	std::cout << "Par_TIME: " << par_time << std::endl;
 	std::cout << "Seq_TIME: " << seq_time << std::endl;
 

@@ -7,7 +7,7 @@
 
 #include "circular_buffer.h"
 
-#define EOS (void *)-1
+#define EOS ((void*)-1)
 
 //gestire gli IFNOTDEF, ad esempio IFNOTDEF circular_buffer, define!
 
@@ -29,7 +29,7 @@ class ProcessingElement{
 			this->sticky = sticky;
 			static std::atomic<unsigned int> id{0};
 			this->thread_id = id++; // (std::thread::hardware_concurrency);
-			std::cout << "ID: " << this->thread_id << std::endl;	
+			//std::cout << "ID: " << this->thread_id << std::endl;	
 		}
 
 		~ProcessingElement(){ //bypassabile per via dela join
@@ -58,7 +58,7 @@ class ProcessingElement{
 			int error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 			if (error != 0)
 				std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
-			std::cout << "ID: " << this->get_id() << " Context: " << this->get_context() << std::endl;
+			//std::cout << "ID: " << this->get_id() << " Context: " << this->get_context() << std::endl;
 			return error;
 		}
 };
@@ -88,12 +88,15 @@ class Emitter : public ProcessingElement{
 			if(this->sticky){move_to_context(this->get_id());}
 			for(auto i = 0; i < (*collection).size(); i++){
 				I &task = (*collection)[i];
-				std::cout << "emi " << task << std::endl;
 				(*win_cbs)[id_queue]->safe_push(&task); //safe_try!!!!
+			//	std::cout << "emi " << i << std::endl;
 				id_queue = (++id_queue)%win_cbs->size();
 			}
-			for(auto i = 0; i < win_cbs->size(); i++)
+			for(auto i = 0; i < win_cbs->size(); i++){
 				(*win_cbs)[i]->safe_push(EOS); // qui non ci può andare la safe_try
+			}
+			//std::cout << " orcaa " << std::endl;
+			//(*win_cbs)[6]->safe_push(EOS); // qui non ci può andare la safe_try
 			return;
 		}
 
@@ -133,14 +136,19 @@ class Worker : public ProcessingElement{
 			void* task = 0;
 			if(this->sticky){move_to_context(this->get_id());}
 			win_cb->safe_pop(&task);
-			while( (I*) task != EOS){ //NON SICURO FUNZIONI
-				I &t = (*((I*) task));
-				std::cout << "w: " << &t << std::endl;
-				O res = fun_body(t);
-				std::cout << "w1: " << &res << std::endl;
-				this->wout_cb->safe_push(&res); //safe_try
+			//std::cout << "circular_buffer " << &win_cb << std::endl;
+			while( task != EOS){ //NON SICURO FUNZIONI
+				//std::cout << (task != EOS) << std::endl;
+				size_t &t = (*((I*) task));
+
+			//	std::cout << this->get_id() << " <--> " << t << std::endl;
+			//	std::cout << this->get_id() << " w: " << t << std::endl;
+				t = (fun_body(t));
+				//std::cout << "w1: " << task << std::endl;
+				this->wout_cb->safe_push(task); //safe_try
 				this->win_cb->safe_pop(&task);	
 			};
+//			std::cout << "end: " << this->get_id() << std::endl;
 			this->wout_cb->safe_push(EOS);
 			return;
 		}
@@ -182,18 +190,23 @@ class Collector: public ProcessingElement{
 
 		void body(){
 			void* task = 0;
-			unsigned int eos_counter = 0;
-			if(this->sticky){move_to_context(this->get_id());}
 			unsigned int id_queue{0};
+			if(this->sticky){move_to_context(this->get_id());}
 			(*wout_cbs)[id_queue]->safe_pop(&task);
-			while( (O*) task != EOS){ //NON SICURO FUNZIONI --> contare EOS!!
+			unsigned int eos_counter = (task == EOS) ? 1 : 0;
+			while(eos_counter < (*wout_cbs).size()){ //contare EOS!!
 				O &t = (*((O*) task));
-				std::cout << "c: " << &t << std::endl;
-				this->collector_cb->safe_push(&t); //safe_try
+				//std::cout << "c: " << t << std::endl;
+			//	this->collector_cb->safe_push(&t); //safe_try
 				id_queue = (++id_queue)%wout_cbs->size();
+
+		//		std::cout << "id" << id_queue << std::endl;
 				(*wout_cbs)[id_queue]->safe_pop(&task);
+		//		std::cout << "oklahoma" << (((O*) task)) << std::endl;
+				eos_counter += (task == EOS) ? 1 : 0;
 			};
-			this->collector_cb->safe_push(EOS);
+			//std::cout << eos_counter << "--eos_counter " << std::endl;
+			//this->collector_cb->safe_push(EOS);
 			return;
 		}
 
@@ -226,7 +239,7 @@ class Autonomic_Farm{
 		std::vector<Circular_Buffer*>* wout_cbs;
 		Collector<O>* collector;
 
-		void add_worker(){
+		void add_worker(){ //c'è da runnarlo poi ehhhh
 			Worker<I,O>* worker = new Worker<I,O>(this->fun_body, this->sticky);
 			this->win_cbs->push_back(worker->get_in_queue());
 			this->wout_cbs->push_back(worker->get_out_queue());
@@ -237,36 +250,34 @@ class Autonomic_Farm{
 	public:
 
 		Autonomic_Farm(unsigned int nw,  std::function<I(O)> fun_body, bool sticky, std::vector<I>* collection){ //max nw??
-			std::cout << "Machine Hardware Concurrency " << std::thread::hardware_concurrency() << std::endl;
+			//std::cout << "Machine Hardware Concurrency " << std::thread::hardware_concurrency() << std::endl;
 			this->nw = nw;
 			this->sticky = sticky;
 			this->fun_body = fun_body;
 			this->win_cbs = new std::vector<Circular_Buffer*>();
 			this->workers = new std::vector<Worker<I,O>*>();
 			this->wout_cbs = new std::vector<Circular_Buffer*>();
-			for(auto i = 0; i < nw; i++)
-				this->add_worker();
 			this->emitter = new Emitter<I>(this->win_cbs, collection, this->sticky);
 			this->collector = new Collector<O>(this->wout_cbs, this->sticky);
+			for(auto i = 0; i < nw; i++)
+				this->add_worker();
+//prima emtter collector così se sticky sono su due core veri subito
 		}
 	
 		void run_and_wait(){
 			this->emitter->run();
-			for(auto i = 0; i < nw; i++)
+			for(auto i = 0; i < nw; i++){
 				(*this->workers)[i]->run();
+			//	std::cout << "worker:" << (*this->workers)[i]->get_id() << std::endl;
+			}
 			this->collector->run();
+			(*this->workers)[nw-1]->join();
+			//std::cout << "emitter: " << this->emitter->get_id() << std::endl;
+			//std::cout << "collector: " << this->collector->get_id() << std::endl;
 			this->collector->join();
-			void* task = 0;
-			unsigned int id_queue{0};
-			this->collector->get_out_queue()->safe_pop(&task);
-			while( (O*) task != EOS){ //NON SICURO FUNZIONI --> contare EOS!!
-				O &t = (*((O*) task));
-				std::cout << "task: " << t << std::endl;
-				this->collector->get_out_queue()->safe_pop(&task);
-			};
-			std::cout << "fine" <<std::endl;
-
+			//std::cout << "fine" <<std::endl;
 		}
+
 		//void push(I task); <-- dipende
 		//O pop();
 };

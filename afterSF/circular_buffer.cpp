@@ -3,6 +3,8 @@
 
 void Circular_Buffer::init(){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
+	for(unsigned int i = 0; i < this->size; i++)
+		this->circular_buffer[i] = NULL;
 	this->d_mutex = new std::mutex();
 	this->p_condition = new std::condition_variable();
 	this->c_condition = new std::condition_variable();
