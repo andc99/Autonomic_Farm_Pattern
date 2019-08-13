@@ -1,9 +1,10 @@
 #include "circular_buffer.h"
 #include <iostream>
 
-void Circular_Buffer::init(){
+
+Circular_Buffer::Circular_Buffer(size_t len) : size(len){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
-	for(unsigned int i = 0; i < this->size; i++)
+	for(size_t i = 0; i < this->size; i++)
 		this->circular_buffer[i] = NULL;
 	this->d_mutex = new std::mutex();
 	this->p_condition = new std::condition_variable();
@@ -11,18 +12,11 @@ void Circular_Buffer::init(){
 	return;
 }
 
-Circular_Buffer::Circular_Buffer() : size(std::numeric_limits<unsigned int>::max()){
-	init();
-	return;
-}
-
-Circular_Buffer::Circular_Buffer(unsigned int len) : size(len){
-	init();
-	return;
-}
-
 Circular_Buffer::~Circular_Buffer(){
 	delete [] this->circular_buffer;
+	delete this->d_mutex;
+	delete this->p_condition;
+	delete this->c_condition;
 	return;
 }
 
@@ -51,13 +45,12 @@ bool Circular_Buffer::safe_pop(void** task){
 	*task = this->circular_buffer[this->p_read];
 	this->circular_buffer[this->p_read] = NULL;
 	this->p_read = (this->p_read == this->size - 1) ? 0 : this->p_read + 1;
-	//std::cout << "write: " << p_write << " read: " << p_read << std::endl;
 	this->p_condition->notify_one();
 	return true;
 }
 
 
-void Circular_Buffer::safe_resize(unsigned int new_size){
+void Circular_Buffer::safe_resize(size_t new_size){
 	std::lock_guard<std::mutex> lock(*d_mutex);
 	this->size = new_size;
 	this->circular_buffer = (void**) realloc (this->circular_buffer, new_size*sizeof(void*));
@@ -65,7 +58,7 @@ void Circular_Buffer::safe_resize(unsigned int new_size){
 }
 
 
-unsigned int Circular_Buffer::safe_get_size(){
+size_t Circular_Buffer::safe_get_size(){
 	std::lock_guard<std::mutex> lock(*d_mutex);
 	return this->size;
 }

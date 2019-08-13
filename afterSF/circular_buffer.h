@@ -6,18 +6,15 @@
 class Circular_Buffer{
 	private:
 		void** circular_buffer;
-		unsigned int p_read = 0, p_write = 0, size = 0;
+		size_t p_read = 0, p_write = 0, size = 0;
 		std::mutex* d_mutex;
-		std::mutex* v_mutex;
 		std::condition_variable* p_condition; //producer
 		std::condition_variable* c_condition; //consumer;
 
-		void init();
 	
 	public:
-		Circular_Buffer();
 
-		Circular_Buffer(unsigned int size);
+		Circular_Buffer(size_t size);
 
 		~Circular_Buffer();
 
@@ -27,8 +24,8 @@ class Circular_Buffer{
 
 		bool safe_pop(void **task);
 
-		void safe_resize(unsigned int new_size);
+		void safe_resize(size_t new_size);
 
-		unsigned int safe_get_size();
+		size_t safe_get_size();
 
 };
