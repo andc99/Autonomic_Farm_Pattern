@@ -1,22 +1,22 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <queue>
 
-class Circular_Buffer{
+class Safe_Queue{
 	private:
-		void** circular_buffer;
-		size_t p_read = 0, p_write = 0, size = 0;
+		std::queue<void*>* queue;
+		size_t size;
 		std::mutex* d_mutex;
 		std::condition_variable* p_condition; //producer
-		std::condition_variable* c_condition; //consumer;
+		std::condition_variable* c_condition; //consumer;	
 
-	
 	public:
+		Safe_Queue(size_t size);
 
-		Circular_Buffer(size_t size);
+		~Safe_Queue();
 
-		~Circular_Buffer();
-
+		//non andrebbero virtual? altrimenti mi farebbe compilare anche senza queste
 		bool safe_push(void* const task);
 
 		bool try_safe_push(void* const task); //if false go next queue

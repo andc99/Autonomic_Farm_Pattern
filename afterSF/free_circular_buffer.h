@@ -2,20 +2,18 @@
 #include <mutex>
 #include <condition_variable>
 
-class Circular_Buffer{
+class Free_Circular_Buffer{
 	private:
-		void** circular_buffer;
+		void** free_circular_buffer;
 		size_t p_read = 0, p_write = 0, size = 0;
 		std::mutex* d_mutex;
-		std::condition_variable* p_condition; //producer
-		std::condition_variable* c_condition; //consumer;
 
 	
 	public:
 
-		Circular_Buffer(size_t size);
+		Free_Circular_Buffer(size_t size);
 
-		~Circular_Buffer();
+		~Free_Circular_Buffer();
 
 		bool safe_push(void* const task);
 

@@ -1,22 +1,15 @@
 #include "circular_buffer.h"
-#include <iostream>
 
 
-Circular_Buffer::Circular_Buffer(size_t size) : size(size){
+Circular_Buffer::Circular_Buffer(size_t size) : Buffer(size){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
 	for(size_t i = 0; i < this->size; i++)
 		this->circular_buffer[i] = NULL;
-	this->d_mutex = new std::mutex();
-	this->p_condition = new std::condition_variable();
-	this->c_condition = new std::condition_variable();
 	return;
 }
 
 Circular_Buffer::~Circular_Buffer(){
 	delete [] this->circular_buffer;
-	delete this->d_mutex;
-	delete this->p_condition;
-	delete this->c_condition;
 	return;
 }
 

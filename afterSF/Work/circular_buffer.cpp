@@ -2,7 +2,7 @@
 #include <iostream>
 
 
-Circular_Buffer::Circular_Buffer(size_t size) : size(size){
+Circular_Buffer::Circular_Buffer(size_t len) : size(len){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
 	for(size_t i = 0; i < this->size; i++)
 		this->circular_buffer[i] = NULL;
@@ -25,13 +25,12 @@ bool Circular_Buffer::safe_push(void* const task){
 	this->p_condition->wait(lock, [=]{return this->circular_buffer[this->p_write] == NULL;});
 	this->circular_buffer[p_write] = task;
 	this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
-	this->c_condition->notify_one();
+	c_condition->notify_one();
 	return true;
 }
 
 bool Circular_Buffer::try_safe_push(void* const task){
-	std::unique_lock<std::mutex> lock(*d_mutex, std::try_to_lock);
-	if(lock.owns_lock()){
+	if(this->d_mutex->try_lock()){
 		this->circular_buffer[p_write] = task;
 		this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
 		this->c_condition->notify_one();

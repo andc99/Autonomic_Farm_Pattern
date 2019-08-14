@@ -1,6 +1,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <limits>
 
 class Circular_Buffer{
 	private:

@@ -26,10 +26,9 @@
 //calcolare dim iniziale buffer in funzione di quanti elementi ci sono nella collection
 //
 //
-//la vera dfferenza con il lock free è che riamngono sempre budy e se ho 8 contesti più di 6 worker non li posso mettere altriementi si impallano alcuni (se metto emitter e collector su i primi due, forse non succede anche se ne dubito)
 //OGGI:
-//mettere ssize_t che indica che può avere valori negativi
 //incapsulare il movimento della queue in modo da poter definire una policy
+//implementare anche la safe queue e la lock_free mia e quella di loro
 //impostare collector sì o no
 //
 //makefile
@@ -95,7 +94,6 @@ int main(int argc, const char** argv){
 	std::cout << "---- Computing ----" << std::endl;
 	par_time = parallel(n_threads, isPrime, buffer_len, sticky, &collection_par);
 	
-	std::cout << "---- Computing ----" << std::endl;
 	seq_time = sequential(&collection_seq);
 
 /*	for(auto i : collection_par)

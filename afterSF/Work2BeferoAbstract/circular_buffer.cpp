@@ -2,7 +2,7 @@
 #include <iostream>
 
 
-Circular_Buffer::Circular_Buffer(size_t size) : size(size){
+Circular_Buffer::Circular_Buffer(size_t len) : size(len){
 	this->circular_buffer = (void**) malloc(this->size*sizeof(void*));
 	for(size_t i = 0; i < this->size; i++)
 		this->circular_buffer[i] = NULL;
