@@ -94,7 +94,6 @@ Worker::Worker(std::function<size_t(size_t)> fun_body, size_t buffer_len, bool s
 void Worker::body(){
 	void* task = 0;
 	if(this->sticky){move_to_context(this->get_id());}
-	std::cout << "ciao" << std::endl;
 	while(!win_cb->safe_pop(&task)) continue;
 	while( task != EOS){ 
 		size_t &t = (*((size_t*) task));
