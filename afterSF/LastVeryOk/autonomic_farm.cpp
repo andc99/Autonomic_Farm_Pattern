@@ -49,7 +49,7 @@ size_t ProcessingElement::move_to_context(size_t id_context){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<size_t>* collection) : ProcessingElement(sticky){
+Emitter::Emitter(std::vector<BUFFER*>* win_cbs, size_t buffer_len, bool sticky, std::vector<size_t>* collection) : ProcessingElement(sticky){
 	this->win_cbs = win_cbs;
 	this->emitter_cb = new BUFFER(buffer_len); 
 	this->collection = collection;
@@ -73,7 +73,7 @@ void Emitter::run(){
 	return;
 }
 
-Buffer* Emitter::get_in_queue(){
+BUFFER* Emitter::get_in_queue(){
 	return this->emitter_cb;
 }
 
@@ -94,7 +94,7 @@ Worker::Worker(std::function<size_t(size_t)> fun_body, size_t buffer_len, bool s
 void Worker::body(){
 	void* task = 0;
 	if(this->sticky){move_to_context(this->get_id());}
-	win_cb->safe_pop(&task);
+	while(!win_cb->safe_pop(&task)) continue;
 	while( task != EOS){ 
 		size_t &t = (*((size_t*) task));
 		t = (fun_body(t));
@@ -111,11 +111,11 @@ void Worker::run(){
 }
 
 
-Buffer* Worker::get_in_queue(){
+BUFFER* Worker::get_in_queue(){
 	return this->win_cb;
 }
 
-Buffer* Worker::get_out_queue(){
+BUFFER* Worker::get_out_queue(){
 	return this->wout_cb;
 }
 
@@ -125,7 +125,7 @@ Buffer* Worker::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, bool sticky):ProcessingElement(sticky){
+Collector::Collector(std::vector<BUFFER*>* wout_cbs, size_t buffer_len, bool sticky):ProcessingElement(sticky){
 	this->wout_cbs = wout_cbs;
 	this->collector_cb = new BUFFER(buffer_len); 
 }
@@ -152,7 +152,7 @@ void Collector::run(){
 	return;
 }
 
-Buffer* Collector::get_out_queue(){
+BUFFER* Collector::get_out_queue(){
 	return this->collector_cb;
 }
 
@@ -176,9 +176,9 @@ Autonomic_Farm::Autonomic_Farm(size_t nw, std::function<size_t(size_t)> fun_body
 	this->nw = nw;
 	this->sticky = sticky;
 	this->fun_body = fun_body;
-	this->win_cbs = new std::vector<Buffer*>();
+	this->win_cbs = new std::vector<BUFFER*>();
 	this->workers = new std::vector<Worker*>();
-	this->wout_cbs = new std::vector<Buffer*>();
+	this->wout_cbs = new std::vector<BUFFER*>();
 	this->emitter = new Emitter(this->win_cbs, buffer_len, this->sticky, collection);
 	this->collector = new Collector(this->wout_cbs, buffer_len, this->sticky);
 	for(size_t i = 0; i < nw; i++)
@@ -190,6 +190,7 @@ void Autonomic_Farm::run_and_wait(){
 	for(size_t i = 0; i < nw; i++)
 		(*this->workers)[i]->run();	
 	this->collector->run();
+	(*this->workers)[nw-1]->join();
 	this->collector->join();
 }
 

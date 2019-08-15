@@ -10,7 +10,11 @@
 
 //service_time_farm() va dentro la farm
 
+//sticky?, ff_buffer, collector, safe_queue
 //timestamper
+//ogni volta che creo la farm, deve prendere il massimo numero di contesti e fare in modulo quello 
+//per assegnarlo ai core
+//
 
 //giustificare ubounded vs bounded queue
 //size_t giustificare-->per generalizzare You may run on a system where size_t is 16 or 64 bits. It's size is implementation defined. Technically, it can be smaller than, equal to, or larger than an “unsigned int”. This allows our compiler to take the necessary steps for optimization purposes 
@@ -22,21 +26,19 @@
 //calcolare dim iniziale buffer in funzione di quanti elementi ci sono nella collection
 //
 //
-//la vera dfferenza con il lock free è che riamngono sempre busy e se ho 8 contesti più di 6 worker non li posso mettere altriementi si impallano alcuni (se metto emitter e collector su i primi due, forse non succede anche se ne dubito)
-////dire che ci sono %hardware concurrency
-//che è stata implementata in modo che fosse il più generale possibile
-//dire che è possibile allacciare lo stream oppure no
-
+//la vera dfferenza con il lock free è che riamngono sempre budy e se ho 8 contesti più di 6 worker non li posso mettere altriementi si impallano alcuni (se metto emitter e collector su i primi due, forse non succede anche se ne dubito)
 //OGGI:
-//
-//makefile
-//GRAfici della pienezza delle queue
-//
-//RIFINITURE:
 //mettere ssize_t che indica che può avere valori negativi
 //incapsulare il movimento della queue in modo da poter definire una policy
-//safe_try switch con safe_oush per il tempo
 //impostare collector sì o no
+//
+//makefile
+//safe_try switch con safe_oush per il tempo
+//GRAfici della pienezza delle queue
+//
+//dire che ci sono %hardware concurrency
+//che è stata implementata in modo che fosse il più generale possibile
+//dire che è possibile allacciare lo stream oppure no
 int isPrime(int x){
 	if(x==2)
 		return 1;

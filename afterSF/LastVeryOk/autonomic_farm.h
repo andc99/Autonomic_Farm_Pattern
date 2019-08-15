@@ -5,19 +5,21 @@
 #include <vector>
 #include <functional>
 
+
 #ifdef CB
-	#include "./buffers/circular_buffer.h"
+	#include "circular_buffer.h"
 	#define BUFFER Circular_Buffer
 #elif SQ
-	#include "./buffers/safe_queue.h"
+	#include "safe_queue.h"
 	#define BUFFER Safe_Queue
 #else
-	#include "./buffers/free_circular_buffer.h"
+	#include "free_circular_buffer.h"
 	#define BUFFER Free_Circular_Buffer
 #endif
 
 #define EOS ((void*)-1)
 
+//gestire gli IFNOTDEF, ad esempio IFNOTDEF circular_buffer, define!
 
 /////////////////////////////////////////////////////////////////////////
 //
@@ -55,18 +57,18 @@ class ProcessingElement{
 
 class Emitter : public ProcessingElement{
 	private:
-		std::vector<Buffer*>* win_cbs; //input queues to workers
-		Buffer* emitter_cb; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
+		std::vector<BUFFER*>* win_cbs; //input queues to workers
+		BUFFER* emitter_cb; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
 		std::vector<size_t>* collection;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<size_t>* collection);
+		Emitter(std::vector<BUFFER*>* win_cbs, size_t buffer_len, bool sticky, std::vector<size_t>* collection);
 
 		void body();
 
 		void run();
 
-		Buffer* get_in_queue();
+		BUFFER* get_in_queue();
 
 };
 
@@ -80,8 +82,8 @@ class Emitter : public ProcessingElement{
 class Worker : public ProcessingElement{
 	private:
 		std::function<size_t(size_t)> fun_body;
-		Buffer* win_cb;
-		Buffer* wout_cb;
+		BUFFER* win_cb;
+		BUFFER* wout_cb;
 
 	public: 
 
@@ -91,9 +93,9 @@ class Worker : public ProcessingElement{
 
 		void run();
 
-		Buffer* get_in_queue();
+		BUFFER* get_in_queue();
 
-		Buffer* get_out_queue();
+		BUFFER* get_out_queue();
 };
 
 
@@ -105,17 +107,17 @@ class Worker : public ProcessingElement{
 
 class Collector: public ProcessingElement{
 	private:
-		std::vector<Buffer*>* wout_cbs;
-		Buffer* collector_cb;
+		std::vector<BUFFER*>* wout_cbs;
+		BUFFER* collector_cb;
 
 	public:
-		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, bool sticky);
+		Collector(std::vector<BUFFER*>* wout_cbs, size_t buffer_len, bool sticky);
 
 		void body();
 
 		void run();
 
-		Buffer* get_out_queue();
+		BUFFER* get_out_queue();
 };
 
 
@@ -130,10 +132,10 @@ class Autonomic_Farm{
 		size_t nw;
 		bool sticky;
 		Emitter* emitter;
-		std::vector<Buffer*>* win_cbs;
+		std::vector<BUFFER*>* win_cbs;
 		std::vector<Worker*>* workers;
 		std::function<size_t(size_t)> fun_body;
-		std::vector<Buffer*>* wout_cbs;
+		std::vector<BUFFER*>* wout_cbs;
 		Collector* collector;
 
 		Worker* add_worker(size_t buffer_len);
