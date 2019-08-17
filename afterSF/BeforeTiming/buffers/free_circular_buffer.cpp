@@ -17,6 +17,7 @@ bool Free_Circular_Buffer::safe_push(void* const task){
 	if(this->free_circular_buffer[this->p_write] == NULL){
 		std::atomic_thread_fence(std::memory_order_release);
 		this->free_circular_buffer[p_write] = task;
+		//std::cout << p_write << std::endl;
 		this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
 		return true;
 	}

@@ -30,6 +30,11 @@ class ProcessingElement{
 		bool sticky;
 		size_t thread_id;
 		std::thread* thread;
+		long processed_elements = 0;
+		long mean_service_time = 0;
+		long variance_service_time = 0;
+
+
 		virtual void body() = 0;
 		virtual void run() = 0;
 
@@ -37,14 +42,25 @@ class ProcessingElement{
 
 		~ProcessingElement();
 
+		void update_stats(long act_service_time);
+
+		long update_mean_service_time(long act_service_time);
+
+		long update_variance_service_time(long act_service_time, long pred_mean_service_time);
+
 	public:
 		void join();
 
 		size_t get_id();
 
-		size_t get_context();
+		ssize_t get_context();
 
-		size_t move_to_context(size_t id_context);
+		ssize_t move_to_context(size_t id_context);
+
+		long get_mean_service_time();
+
+		long get_variance_service_time();
+
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -57,10 +73,11 @@ class Emitter : public ProcessingElement{
 	private:
 		std::vector<Buffer*>* win_cbs; //input queues to workers
 		Buffer* emitter_cb; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
-		std::vector<size_t>* collection;
+		std::vector<ssize_t>* collection;
+		std::mutex* sleep_mutex;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<size_t>* collection);
+		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection, std::mutex* sleep_mutex);
 
 		void body();
 
@@ -79,13 +96,13 @@ class Emitter : public ProcessingElement{
 
 class Worker : public ProcessingElement{
 	private:
-		std::function<size_t(size_t)> fun_body;
+		std::function<ssize_t(ssize_t)> fun_body;
 		Buffer* win_cb;
 		Buffer* wout_cb;
 
 	public: 
 
-		Worker(std::function<size_t(size_t)> fun_body, size_t buffer_len, bool sticky);
+		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky);
 
 		void body();
 
@@ -127,20 +144,28 @@ class Collector: public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		size_t nw;
+		size_t nw, max_nw;
 		bool sticky;
+		std::mutex* sleep_mutex;
 		Emitter* emitter;
+		std::vector<Buffer*>* paused_threads;
 		std::vector<Buffer*>* win_cbs;
 		std::vector<Worker*>* workers;
-		std::function<size_t(size_t)> fun_body;
+		std::function<ssize_t(ssize_t)> fun_body;
 		std::vector<Buffer*>* wout_cbs;
 		Collector* collector;
 
 		Worker* add_worker(size_t buffer_len);
 
+		long get_service_time_farm();
+
+		int pause_thread();
+		
+		void wake_up_thread(int thread_id);
+
 	public:
 
-		Autonomic_Farm(size_t nw, std::function<size_t(size_t)> fun_body, size_t buffer_len, bool sticky, std::vector<size_t>* collection);
+		Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection);
 
 		void run_and_wait();
 
