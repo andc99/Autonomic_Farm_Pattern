@@ -42,6 +42,8 @@
 //stato necessario aggiornare ad ogni ciclo di push e pop lo sched_get cpu chiamandlo quindi dal thread stesso e risolvendo il problema. Però così è necessaria la sincronizzazione e fare lock e unlock di continuo inutilmente. Per questo ho preferito addormentare su una variabile di condizione i thread. Inoltre il collector e l'emitter ho notato che avevano un service time piuttosto trascurabile quindi ci stava appesentirli con lock per la scansione del vettore di buffer
 //con il modo del ne con lock è una rogna perche devo fare lock e unlock su quello ma inoltre, per evitare di mettere altre lock, avrei dovuto inserire una try_lock sul collector. In questo modo però avrei che diventa troppo intensive come operazione. 
 //In quest'altro modo faccio un po' di lock e un lock ma posso fare hyperthreading
+//Se i thread non sono sticky come faccio a garantire che quando sposto un thread su un core dove è presente già un thread, quest'ultimo thread non viene spostao dall'OS e che quindi aumento il parallelism degree involontariamente?
+//--> Dire che ho voluto usare i thread sticky al fine di poter gestire e fare robe (anche loro con ff lo fanno, no)
 //Passo la funzione di scegliere il nuovo elemento come parametro in modo da incapsulare le queue sulle quali deve inserire i valori o
 //OGGI:
 //rinominare queue in buffer

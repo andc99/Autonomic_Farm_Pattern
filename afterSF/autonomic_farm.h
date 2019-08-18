@@ -29,11 +29,12 @@ class ProcessingElement{
 	protected:
 		bool sticky;
 		size_t thread_id;
+		size_t context_id;
 		std::thread* thread;
+		std::mutex* context_id_lock;
 		long processed_elements = 0;
 		long mean_service_time = 0;
 		long variance_service_time = 0;
-
 
 		virtual void body() = 0;
 		virtual void run() = 0;
@@ -48,12 +49,14 @@ class ProcessingElement{
 
 		long update_variance_service_time(long act_service_time, long pred_mean_service_time);
 
+		void set_context();
+
 	public:
 		void join();
 
 		size_t get_id();
 
-		ssize_t get_context();
+		size_t get_context();
 
 		ssize_t move_to_context(size_t id_context);
 

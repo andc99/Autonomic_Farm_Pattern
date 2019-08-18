@@ -12,10 +12,12 @@ ProcessingElement::ProcessingElement(bool sticky){
 	this->sticky = sticky;
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
+	this->context_id_lock = new std::mutex();
 }
 
 ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
 	delete thread;
+	delete this->context_id_lock;
 	return;
 }
 
@@ -28,8 +30,15 @@ size_t ProcessingElement::get_id(){
 	return this->thread_id;
 }
 
-ssize_t ProcessingElement::get_context(){
-	return sched_getcpu();
+void ProcessingElement::set_context(){
+	std::lock_guard<std::mutex> lock(*context_id_lock);
+	this->context_id = sched_getcpu();
+	return;
+}
+
+size_t ProcessingElement::get_context(){
+	std::lock_guard<std::mutex> lock(*context_id_lock);
+	return this->context_id;
 }
 
 ssize_t ProcessingElement::move_to_context(size_t id_context){
