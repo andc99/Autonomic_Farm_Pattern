@@ -75,11 +75,10 @@ long ProcessingElement::update_variance_service_time(long act_service_time, long
 //
 /////////////////////////////////////////////////////////////////////////
 
-Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection, std::mutex* sleep_mutex) : ProcessingElement(sticky){
+Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection) : ProcessingElement(sticky){
 	this->win_cbs = win_cbs;
 	this->emitter_cb = new BUFFER(buffer_len); 
 	this->collection = collection;
-	this->sleep_mutex = sleep_mutex;
 }
 
 void Emitter::body(){
@@ -90,11 +89,8 @@ void Emitter::body(){
 	for(size_t i = 0; i < (*collection).size(); i++){
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &task = (*collection)[i];
-		{
-			std::lock_guard<std::mutex> lock(*sleep_mutex);
-			(*win_cbs)[id_queue]->safe_push(&task); //safe_try!!!!
-			id_queue = (++id_queue)%win_cbs->size();	
-		}
+		(*win_cbs)[id_queue]->safe_push(&task); //safe_try!!!!
+		id_queue = (++id_queue)%win_cbs->size();	
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
@@ -225,31 +221,17 @@ long Autonomic_Farm::get_service_time_farm(){
 }
 */
 
-int Autonomic_Farm::pause_thread(){
-	std::lock_guard<std::mutex> lock(*sleep_mutex);
-	int to_pause = rand() % this->win_cbs->size();		
-	this->paused_threads->push_back((*this->win_cbs)[to_pause]);
-	this->win_cbs->erase(this->win_cbs->begin()+to_pause);
-	return to_pause;
-}
-
-void Autonomic_Farm::wake_up_thread(int thread_id){
-	(*this->paused_threads)[0]->safe_push(EOS);
-	return;
-}
 
 
-Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection){ //max nw??
+Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection){ 
 	this->nw = nw;
 	this->max_nw = max_nw;
 	this->sticky = sticky;
 	this->fun_body = fun_body;
-	this->sleep_mutex = new std::mutex();
-	this->paused_threads = new std::vector<Buffer*>();
 	this->win_cbs = new std::vector<Buffer*>();
 	this->workers = new std::vector<Worker*>();
 	this->wout_cbs = new std::vector<Buffer*>();
-	this->emitter = new Emitter(this->win_cbs, buffer_len, this->sticky, collection, this->sleep_mutex);
+	this->emitter = new Emitter(this->win_cbs, buffer_len, this->sticky, collection);
 	this->collector = new Collector(this->wout_cbs, buffer_len, this->sticky);
 	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
 		this->add_worker(buffer_len);
@@ -257,13 +239,9 @@ Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(s
 
 void Autonomic_Farm::run_and_wait(){
 	this->emitter->run();
-	for(size_t i = 0; i < nw; i++)
-		(*this->workers)[i]->run();	
+	for(auto worker : (*this->workers))
+		worker->run();	
 	this->collector->run();
-	std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-	int pos = this->pause_thread();
-	std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-	this->wake_up_thread(pos);
 	this->collector->join();
 	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
 	for(size_t i = 0; i < nw; i++)

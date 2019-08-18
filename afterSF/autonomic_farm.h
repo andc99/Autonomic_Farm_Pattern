@@ -74,10 +74,9 @@ class Emitter : public ProcessingElement{
 		std::vector<Buffer*>* win_cbs; //input queues to workers
 		Buffer* emitter_cb; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
 		std::vector<ssize_t>* collection;
-		std::mutex* sleep_mutex;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection, std::mutex* sleep_mutex);
+		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection);
 
 		void body();
 
@@ -144,7 +143,8 @@ class Collector: public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		size_t nw, max_nw;
+		std::atomic<size_t> nw;
+		size_t max_nw;
 		bool sticky;
 		std::mutex* sleep_mutex;
 		Emitter* emitter;
@@ -159,16 +159,13 @@ class Autonomic_Farm{
 
 		long get_service_time_farm();
 
-		int pause_thread();
-		
-		void wake_up_thread(int thread_id);
 
 	public:
 
 		Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection);
 
 		void run_and_wait();
-
+		
 		//void push(I task); <-- dipende
 		//O pop();
 };

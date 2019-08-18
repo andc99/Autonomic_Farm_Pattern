@@ -11,7 +11,14 @@
 //service_time_farm() va dentro la farm
 
 //timestamper
-
+//
+//Enfatizzare: la mia è una ordere_farm perchè agisco sui puntatori delle posizioni quindi la collection uscente è ordinataaa!!
+//
+//A fare così con nw per capire quelli attivi ho il problema che il collector comunque ruota su tutte le code:
+//caso estremo 64 thread di cui solo 1 attivo. Dovrà fare tante syscall. 
+//Caso: Fa una pop su una coda che non ha nulla, si mette a dormire? --> SI serve una try_lock per forza.
+//Facendo così sono sempre busy quindi molto costosa come operazione
+//
 //giustificare ubounded vs bounded queue
 //size_t giustificare-->per generalizzare You may run on a system where size_t is 16 or 64 bits. It's size is implementation defined. Technically, it can be smaller than, equal to, or larger than an “unsigned int”. This allows our compiler to take the necessary steps for optimization purposes 
 //fare il check nella farm che i valori non siano negativi
@@ -33,8 +40,11 @@
 //Quindi un sa
 //Poiché non c'è una funzione che restituisce la cpu del thread chiamandola da un altro thread, sarebbe
 //stato necessario aggiornare ad ogni ciclo di push e pop lo sched_get cpu chiamandlo quindi dal thread stesso e risolvendo il problema. Però così è necessaria la sincronizzazione e fare lock e unlock di continuo inutilmente. Per questo ho preferito addormentare su una variabile di condizione i thread. Inoltre il collector e l'emitter ho notato che avevano un service time piuttosto trascurabile quindi ci stava appesentirli con lock per la scansione del vettore di buffer
+//con il modo del ne con lock è una rogna perche devo fare lock e unlock su quello ma inoltre, per evitare di mettere altre lock, avrei dovuto inserire una try_lock sul collector. In questo modo però avrei che diventa troppo intensive come operazione. 
+//In quest'altro modo faccio un po' di lock e un lock ma posso fare hyperthreading
+//Passo la funzione di scegliere il nuovo elemento come parametro in modo da incapsulare le queue sulle quali deve inserire i valori o
 //OGGI:
-//
+//rinominare queue in buffer
 //GRAfici della pienezza delle queue
 //
 //RIFINITURE:
