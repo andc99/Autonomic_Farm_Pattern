@@ -27,7 +27,6 @@
 
 class ProcessingElement{
 	protected:
-		bool sticky;
 		size_t thread_id;
 		size_t context_id;
 		std::thread* thread;
@@ -39,7 +38,7 @@ class ProcessingElement{
 		virtual void body() = 0;
 		virtual void run() = 0;
 
-		ProcessingElement(bool sticky);
+		ProcessingElement(size_t context_id);
 
 		~ProcessingElement();
 
@@ -48,8 +47,7 @@ class ProcessingElement{
 		long update_mean_service_time(long act_service_time);
 
 		long update_variance_service_time(long act_service_time, long pred_mean_service_time);
-
-		void set_context();
+		
 
 	public:
 		void join();
@@ -57,6 +55,8 @@ class ProcessingElement{
 		size_t get_id();
 
 		size_t get_context();
+
+		void set_context(size_t context_id);
 
 		ssize_t move_to_context(size_t id_context);
 
@@ -79,7 +79,7 @@ class Emitter : public ProcessingElement{
 		std::vector<ssize_t>* collection;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection);
+		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection, size_t context_id);
 
 		void body();
 
@@ -104,7 +104,7 @@ class Worker : public ProcessingElement{
 
 	public: 
 
-		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky);
+		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, size_t context_id);
 
 		void body();
 
@@ -128,7 +128,7 @@ class Collector: public ProcessingElement{
 		Buffer* collector_cb;
 
 	public:
-		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, bool sticky);
+		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, size_t context_id);
 
 		void body();
 
@@ -148,7 +148,6 @@ class Autonomic_Farm{
 	private:
 		std::atomic<size_t> nw;
 		size_t max_nw;
-		bool sticky;
 		std::mutex* sleep_mutex;
 		Emitter* emitter;
 		std::vector<Buffer*>* paused_threads;
@@ -158,7 +157,7 @@ class Autonomic_Farm{
 		std::vector<Buffer*>* wout_cbs;
 		Collector* collector;
 
-		Worker* add_worker(size_t buffer_len);
+		Worker* add_worker(size_t buffer_len, size_t nw);
 
 		long get_service_time_farm();
 

@@ -9,7 +9,8 @@
 #include "autonomic_farm.h"
 
 //service_time_farm() va dentro la farm
-
+//nw_max perchè voglio evitare che possano crescere all'infinito le risorse utilizzate
+//provato a vedere le differenze di performance tra il caso dove vengono allocati sopra a 4 thread esistentei altri 4 thread e le performance sono simili al caso in cui sono 4 thread e basta
 //timestamper
 //
 //Enfatizzare: la mia è una ordere_farm perchè agisco sui puntatori delle posizioni quindi la collection uscente è ordinataaa!!

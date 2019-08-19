@@ -8,11 +8,11 @@
 /////////////////////////////////////////////////////////////////////////
 
 
-ProcessingElement::ProcessingElement(bool sticky){
-	this->sticky = sticky;
+ProcessingElement::ProcessingElement(size_t context_id){
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
 	this->context_id_lock = new std::mutex();
+	this->context_id = context_id;
 }
 
 ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
@@ -30,15 +30,17 @@ size_t ProcessingElement::get_id(){
 	return this->thread_id;
 }
 
-void ProcessingElement::set_context(){
-	std::lock_guard<std::mutex> lock(*context_id_lock);
-	this->context_id = sched_getcpu();
-	return;
-}
 
 size_t ProcessingElement::get_context(){
 	std::lock_guard<std::mutex> lock(*context_id_lock);
 	return this->context_id;
+}
+
+
+void ProcessingElement::set_context(size_t context_id){
+	std::lock_guard<std::mutex> lock(*context_id_lock);
+	this->context_id = context_id;
+	return;
 }
 
 ssize_t ProcessingElement::move_to_context(size_t id_context){
@@ -48,6 +50,7 @@ ssize_t ProcessingElement::move_to_context(size_t id_context){
 	ssize_t error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 	if (error != 0)
 		std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
+	this->context_id = id_context; //se errore non assegnare. Cambiare nome variabile
 	return error;
 }
 
@@ -84,7 +87,7 @@ long ProcessingElement::update_variance_service_time(long act_service_time, long
 //
 /////////////////////////////////////////////////////////////////////////
 
-Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection) : ProcessingElement(sticky){
+Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection, size_t context_id) : ProcessingElement(context_id){
 	this->win_cbs = win_cbs;
 	this->emitter_cb = new BUFFER(buffer_len); 
 	this->collection = collection;
@@ -94,7 +97,7 @@ void Emitter::body(){
 	size_t id_queue{0};
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	if(this->sticky){move_to_context(this->get_id());}
+	move_to_context(get_context());
 	for(size_t i = 0; i < (*collection).size(); i++){
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &task = (*collection)[i];
@@ -126,7 +129,7 @@ Buffer* Emitter::get_in_queue(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky):ProcessingElement(sticky){
+Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, size_t context_id):ProcessingElement(context_id){
 	this->fun_body = fun_body;
 	this->win_cb = new BUFFER(buffer_len); 
 	this->wout_cb = new BUFFER(buffer_len); 
@@ -136,7 +139,7 @@ void Worker::body(){
 	void* task = 0;
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	if(this->sticky){move_to_context(this->get_id());}
+	move_to_context(get_context());
 	win_cb->safe_pop(&task);
 	while( task != EOS){ 
 		start_time = std::chrono::high_resolution_clock::now();
@@ -145,8 +148,10 @@ void Worker::body(){
 		this->wout_cb->safe_push(&t); //safe_try
 		this->win_cb->safe_pop(&task);	
 		end_time = std::chrono::high_resolution_clock::now();
-		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
+		if (this->get_context() != sched_getcpu())
+			move_to_context(this->get_context());
+		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 	};
 	this->wout_cb->safe_push(EOS);
 	return;
@@ -172,7 +177,7 @@ Buffer* Worker::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, bool sticky):ProcessingElement(sticky){
+Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, size_t context_id):ProcessingElement(context_id){
 	this->wout_cbs = wout_cbs;
 	this->collector_cb = new BUFFER(buffer_len); 
 }
@@ -182,7 +187,7 @@ void Collector::body(){
 	size_t id_queue{0};
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	if(this->sticky){move_to_context(this->get_id());}
+	move_to_context(get_context());
 	(*wout_cbs)[id_queue]->safe_pop(&task);
 	size_t eos_counter = (task == EOS) ? 1 : 0;
 	while(eos_counter < (*wout_cbs).size()){ 
@@ -215,8 +220,8 @@ Buffer* Collector::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Worker* Autonomic_Farm::add_worker(size_t buffer_len){ //c'è da runnarlo poi ehhhh
-	Worker* worker = new Worker(this->fun_body, buffer_len, this->sticky);
+Worker* Autonomic_Farm::add_worker(size_t buffer_len, size_t nw){ //c'è da runnarlo poi ehhhh
+	Worker* worker = new Worker(this->fun_body, buffer_len, nw);
 	this->win_cbs->push_back(worker->get_in_queue());
 	this->wout_cbs->push_back(worker->get_out_queue());
 	(*this->workers).push_back(worker);
@@ -235,15 +240,16 @@ long Autonomic_Farm::get_service_time_farm(){
 Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection){ 
 	this->nw = nw;
 	this->max_nw = max_nw;
-	this->sticky = sticky;
 	this->fun_body = fun_body;
 	this->win_cbs = new std::vector<Buffer*>();
 	this->workers = new std::vector<Worker*>();
 	this->wout_cbs = new std::vector<Buffer*>();
-	this->emitter = new Emitter(this->win_cbs, buffer_len, this->sticky, collection);
-	this->collector = new Collector(this->wout_cbs, buffer_len, this->sticky);
+	this->emitter = new Emitter(this->win_cbs, buffer_len, collection, 0);
+	this->collector = new Collector(this->wout_cbs, buffer_len, 0);
 	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len);
+		this->add_worker(buffer_len, i+1);
+	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
+		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
 }
 
 void Autonomic_Farm::run_and_wait(){
@@ -253,7 +259,7 @@ void Autonomic_Farm::run_and_wait(){
 	this->collector->run();
 	this->collector->join();
 	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
-	for(size_t i = 0; i < nw; i++)
+	for(size_t i = 0; i < max_nw; i++)
 		std::cout << "Worker " << (*this->workers)[i]->get_id() << ": " << (*this->workers)[i]->get_mean_service_time() << " - " << (*this->workers)[i]->get_variance_service_time() << std::endl;
 	std::cout << "Collector: " << this->collector->get_mean_service_time() << " - " << this->collector->get_variance_service_time() << std::endl;
 }
