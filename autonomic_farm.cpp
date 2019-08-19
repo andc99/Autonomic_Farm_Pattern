@@ -12,6 +12,7 @@ ProcessingElement::ProcessingElement(size_t context_id){
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
 	this->context_id_lock = new std::mutex();
+	this->stats_lock = new std::mutex();
 	this->context_id = context_id;
 }
 
@@ -55,14 +56,17 @@ ssize_t ProcessingElement::move_to_context(size_t id_context){
 }
 
 long ProcessingElement::get_mean_service_time(){
+	std::lock_guard<std::mutex> lock(*stats_lock);
 	return this->mean_service_time;
 }
 
 long ProcessingElement::get_variance_service_time(){
+	std::lock_guard<std::mutex> lock(*stats_lock);
 	return this->variance_service_time;
 }
 
 void ProcessingElement::update_stats(long act_service_time){
+	std::lock_guard<std::mutex> lock(*stats_lock);
 	size_t pred_mean_service_time = this->mean_service_time;
 	this->processed_elements++;
 	this->update_mean_service_time(act_service_time);
@@ -139,8 +143,8 @@ void Worker::body(){
 	void* task = 0;
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	move_to_context(get_context());
-	win_cb->safe_pop(&task);
+	this->move_to_context(get_context());
+	this->win_cb->safe_pop(&task);
 	while( task != EOS){ 
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &t = (*((ssize_t*) task));
@@ -220,20 +224,24 @@ Buffer* Collector::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Worker* Autonomic_Farm::add_worker(size_t buffer_len, size_t nw){ //c'è da runnarlo poi ehhhh
-	Worker* worker = new Worker(this->fun_body, buffer_len, nw);
+Worker* Autonomic_Farm::add_worker(size_t buffer_len, size_t context_id){ //c'è da runnarlo poi ehhhh
+	Worker* worker = new Worker(this->fun_body, buffer_len, context_id);
 	this->win_cbs->push_back(worker->get_in_queue());
 	this->wout_cbs->push_back(worker->get_out_queue());
 	(*this->workers).push_back(worker);
 	return worker;
 }
 
-//da lockcare e capire quale sia il service time più giusto
-/*
 long Autonomic_Farm::get_service_time_farm(){
-	return std::max({this->emitter.
+	long mean_service_time_workers = 0;
+	for(auto worker : (*this->workers))
+		mean_service_time_workers+=worker->get_mean_service_time();
+	mean_service_time_workers/=this->max_nw;
+	return std::max({this->emitter->get_mean_service_time(),
+			this->collector->get_mean_service_time(),
+			mean_service_time_workers/static_cast<long>(this->max_nw)});
+			//castato max_nw a long... fare check sui tipi eh
 }
-*/
 
 
 
@@ -251,6 +259,16 @@ Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(s
 	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
 		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
 }
+
+//passare come parametro questoooo
+std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffers){
+	size_t id_queue{0};
+	return [&id_queue, max_nw, buffers]() mutable {
+		id_queue = (id_queue < max_nw) ? ++id_queue : id_queue = 0;	
+		return (*buffers)[id_queue];
+	};
+}
+
 
 void Autonomic_Farm::run_and_wait(){
 	this->emitter->run();

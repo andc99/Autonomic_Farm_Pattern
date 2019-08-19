@@ -8,7 +8,15 @@
 
 #include "autonomic_farm.h"
 
+
+
+//processed_elements dovrebbero essere size_t (o unsigned long) non long (sia in farm che in buffer.h)
+//potrei far fare all'emitter ed al collector il manager. Quando finisce l'Emitter di inviare tutti gli elementi, smette anche il manager. Non male come soluzione considerando che non fa molto l'emitter. Poi però c'è da controllare quanto varia il suo service time. Qui viene però una formula: l'emitter definisce il lower bound di rate ache cui manda elementi. Quindi se l'emitter ci metto 60 per ogni push ed ho 4 worker, ad ogni worker arriva lavoro dopo 180, quindi se il task dura 180 o più è buono, altrimenti no. FORMULA: TsEmitter*(nw-1) <= TsWorker. Se Emitter è 300 e nw = 4 dopo 900 arriva il prossimo task e quindi affinchè sia performante TsWorker >= TsEmitter*(nw-1). Il caso estremo dove non c'è parallelismo è quello in cui ad ogni istante viene calcolato solo 1 elemento, quindi quadno TsWorker è << TsEmitter.
+//uindi presumo che su un core dove c'è un thread con try_pop, può non fare un buon hyperthreading
 //service_time_farm() va dentro la farm
+//
+//farm oridnata
+//
 //nw_max perchè voglio evitare che possano crescere all'infinito le risorse utilizzate
 //provato a vedere le differenze di performance tra il caso dove vengono allocati sopra a 4 thread esistentei altri 4 thread e le performance sono simili al caso in cui sono 4 thread e basta
 //timestamper

@@ -30,7 +30,7 @@ class ProcessingElement{
 		size_t thread_id;
 		size_t context_id;
 		std::thread* thread;
-		std::mutex* context_id_lock;
+		std::mutex *context_id_lock, *stats_lock;
 		long processed_elements = 0;
 		long mean_service_time = 0;
 		long variance_service_time = 0;
@@ -148,9 +148,7 @@ class Autonomic_Farm{
 	private:
 		std::atomic<size_t> nw;
 		size_t max_nw;
-		std::mutex* sleep_mutex;
 		Emitter* emitter;
-		std::vector<Buffer*>* paused_threads;
 		std::vector<Buffer*>* win_cbs;
 		std::vector<Worker*>* workers;
 		std::function<ssize_t(ssize_t)> fun_body;
