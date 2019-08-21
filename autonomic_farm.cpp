@@ -152,10 +152,10 @@ void Worker::body(){
 		this->wout_cb->safe_push(&t); //safe_try
 		this->win_cb->safe_pop(&task);	
 		end_time = std::chrono::high_resolution_clock::now();
-		this->update_stats(act_service_time);
 		if (this->get_context() != sched_getcpu())
 			move_to_context(this->get_context());
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+		this->update_stats(act_service_time);
 	};
 	this->wout_cb->safe_push(EOS);
 	return;
@@ -237,28 +237,13 @@ long Autonomic_Farm::get_service_time_farm(){
 	for(auto worker : (*this->workers))
 		mean_service_time_workers+=worker->get_mean_service_time();
 	mean_service_time_workers/=this->max_nw;
+
 	return std::max({this->emitter->get_mean_service_time(),
 			this->collector->get_mean_service_time(),
-			mean_service_time_workers/static_cast<long>(this->max_nw)});
+			mean_service_time_workers/static_cast<long>(this->nw)});//questo è nw perchè sono quelli effittivi
 			//castato max_nw a long... fare check sui tipi eh
 }
 
-
-
-Autonomic_Farm::Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection){ 
-	this->nw = nw;
-	this->max_nw = max_nw;
-	this->fun_body = fun_body;
-	this->win_cbs = new std::vector<Buffer*>();
-	this->workers = new std::vector<Worker*>();
-	this->wout_cbs = new std::vector<Buffer*>();
-	this->emitter = new Emitter(this->win_cbs, buffer_len, collection, 0);
-	this->collector = new Collector(this->wout_cbs, buffer_len, 0);
-	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, i+1);
-	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
-}
 
 //passare come parametro questoooo
 std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffers){
@@ -269,13 +254,56 @@ std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffer
 	};
 }
 
+//deve poter crescere e decrescere
+void Autonomic_Farm::manager_body(){ //non aggiungerne solo uno alla volta!
+	std::chrono::high_resolution_clock::time_point start_time, end_time;
+	long act_service_time;
+	while(true){
+		start_time = std::chrono::high_resolution_clock::now();
+		for(auto worker : *workers){
+			if(worker->get_in_queue()->is_bottleneck() && nw < max_nw){
+				worker->set_context(nw++); //se nw = 4, allora primo contesto ok è 4 ma siccome partono da 0, prima assegno 4 e poi incremento a 5	
+			}
+		}
+		//std::cout << this->get_service_time_farm() << std::endl;
+		if(this->get_service_time_farm() > this->ts_goal && nw < max_nw){	
+			(*this->workers)[nw-1]->set_context(nw);
+			nw++;
+		}
+		//if(nw >= max_nw) //check necesssario perchè non alloco mai più di max_nw. Se lo supero segfFault perchè non esiste
+		//	std::cout << "problema" << std::endl;
+		end_time = std::chrono::high_resolution_clock::now();
+		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+		std::cout << act_service_time << std::endl;
+	};
+}
+
+Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection){ 
+	this->ts_goal = ts_goal;
+	this->nw = nw;
+	this->max_nw = max_nw;
+	this->fun_body = fun_body;
+	this->win_cbs = new std::vector<Buffer*>();
+	this->workers = new std::vector<Worker*>();
+	this->wout_cbs = new std::vector<Buffer*>();
+	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, this->win_cbs);
+	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, this->wout_cbs);
+	this->emitter = new Emitter(this->win_cbs, buffer_len, collection, 0);
+	this->collector = new Collector(this->wout_cbs, buffer_len, 0);
+	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
+		this->add_worker(buffer_len, i+1);
+	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
+		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
+}
 
 void Autonomic_Farm::run_and_wait(){
 	this->emitter->run();
 	for(auto worker : (*this->workers))
 		worker->run();	
 	this->collector->run();
+	std::thread* manager = new std::thread(&Autonomic_Farm::manager_body, this);
 	this->collector->join();
+	manager->detach();
 	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
 	for(size_t i = 0; i < max_nw; i++)
 		std::cout << "Worker " << (*this->workers)[i]->get_id() << ": " << (*this->workers)[i]->get_mean_service_time() << " - " << (*this->workers)[i]->get_variance_service_time() << std::endl;

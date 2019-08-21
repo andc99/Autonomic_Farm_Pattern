@@ -9,7 +9,32 @@
 #include "autonomic_farm.h"
 
 
+//OGGI
+//-non sarebbe meglio mettere il manager come derivato di ProcessingElement?
+//-un bel body di body? Non so quanto senso abbia 
+//-mettere che max_nw non può essere modificato (const)
+//-incrementare a stock gli nw
+//-mettere la possibilità di decrescre
+//-utilizzare una struttura dati per sapere dove sono i worker
+//-struttura dati per lo stability problem
+//-incapsulare l'incremento e decremento
+//-sbuggare il server che quando metti 64 128, ci arriva a 128 altrimenti se parti da 128 seg fault
+//-spostare il manager nell'emitter che così quando finisce finisce tutto
+//-con il modo sopra probabilmente si sbugga un poco altre cose
+//-quando fa il join il collector cambio valore ad una atomic bool che setta il manager
+//-manager a parte ma comunque su un core dove c'è emitter o collector, con possibilità di metterlo a parte
+//-try-pop sul collector?
+//-possibilità di rimuovere il collector
+//-se non viene rimosso allora c'è da specificare un body perchè altreimenti non avrebbe veramente senso, la collection è già modificat
+//-se non viene rimosso allora c'è da specificare un body perchè altreimenti non avrebbe veramente senso, la collection è già modificataa
+//-la collection non dovrebbe essere passata come const alla farm?
+//-enache emitter deve poter decidere di esporre la coda oppure no
+//-pulire variabili inutili
+//-pulire tipizzazioni stupide
 
+//ho provato a mettere 64 thread su un unico core e farlo runnare. Il tempo è maggiore del sequenziale (ok) e non è distante dall'averlo fatto runnare solo con 1 thread (sequenziale overheadato parallelo)
+//Mostrarlo tramite grafici. Easy
+//la lambda per poter cambaire la policy nel futuro
 //processed_elements dovrebbero essere size_t (o unsigned long) non long (sia in farm che in buffer.h)
 //potrei far fare all'emitter ed al collector il manager. Quando finisce l'Emitter di inviare tutti gli elementi, smette anche il manager. Non male come soluzione considerando che non fa molto l'emitter. Poi però c'è da controllare quanto varia il suo service time. Qui viene però una formula: l'emitter definisce il lower bound di rate ache cui manda elementi. Quindi se l'emitter ci metto 60 per ogni push ed ho 4 worker, ad ogni worker arriva lavoro dopo 180, quindi se il task dura 180 o più è buono, altrimenti no. FORMULA: TsEmitter*(nw-1) <= TsWorker. Se Emitter è 300 e nw = 4 dopo 900 arriva il prossimo task e quindi affinchè sia performante TsWorker >= TsEmitter*(nw-1). Il caso estremo dove non c'è parallelismo è quello in cui ad ogni istante viene calcolato solo 1 elemento, quindi quadno TsWorker è << TsEmitter.
 //uindi presumo che su un core dove c'è un thread con try_pop, può non fare un buon hyperthreading
@@ -80,9 +105,9 @@ int isPrime(int x){
 	return 1;
 }
 
-long parallel(size_t n_threads, size_t n_max_threads, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection){
+long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
-	Autonomic_Farm afs(n_threads, n_max_threads, fun_body, buffer_len, sticky, collection);
+	Autonomic_Farm afs(ts_goal, n_threads, n_max_threads, fun_body, buffer_len, collection);
 	afs.run_and_wait();
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
@@ -108,7 +133,7 @@ int main(int argc, const char** argv){
 	size_t n_threads = std::stoul(argv[2]);
 	size_t n_max_threads = std::stoul(argv[3]);
 	size_t buffer_len = atoi(argv[4]);
-	bool sticky = atoi(argv[5]);
+	long ts_goal = atoi(argv[5]);
 
 	long seq_time, par_time;
 	std::vector<ssize_t> collection_par, collection_seq;
@@ -119,7 +144,7 @@ int main(int argc, const char** argv){
 	}
 
 	std::cout << "---- Computing ----" << std::endl;
-	par_time = parallel(n_threads, n_max_threads, isPrime, buffer_len, sticky, &collection_par);
+	par_time = parallel(ts_goal, n_threads, n_max_threads, isPrime, buffer_len, &collection_par);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
 	seq_time = sequential(&collection_seq);

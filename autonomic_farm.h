@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 
+
 #ifdef CB
 	#include "./buffers/circular_buffer.h"
 	#define BUFFER Circular_Buffer
@@ -126,6 +127,7 @@ class Collector: public ProcessingElement{
 	private:
 		std::vector<Buffer*>* wout_cbs;
 		Buffer* collector_cb;
+		std::function<Buffer*()> next_buffer;
 
 	public:
 		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, size_t context_id);
@@ -146,7 +148,8 @@ class Collector: public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		std::atomic<size_t> nw;
+		long ts_goal;
+		size_t nw; //--------------------- serve sempre atomic? levo
 		size_t max_nw;
 		Emitter* emitter;
 		std::vector<Buffer*>* win_cbs;
@@ -159,10 +162,11 @@ class Autonomic_Farm{
 
 		long get_service_time_farm();
 
+		void manager_body();
 
 	public:
 
-		Autonomic_Farm(size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, bool sticky, std::vector<ssize_t>* collection);
+		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void run_and_wait();
 		
