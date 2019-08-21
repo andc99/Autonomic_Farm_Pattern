@@ -3,6 +3,7 @@
 #include <iostream>
 #include <math.h>
 #include <vector>
+#include <queue>
 #include <functional>
 
 
@@ -139,6 +140,29 @@ class Collector: public ProcessingElement{
 		Buffer* get_out_queue();
 };
 
+/////////////////////////////////////////////////////////////////////////
+//
+//	Manager	
+//
+/////////////////////////////////////////////////////////////////////////
+
+class Manager : public ProcessingElement{
+	private:
+		size_t nw;
+		const size_t max_nw, ncontexts, ncores;
+		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
+
+	public:
+		Manager(ProcessingElement* emitter,
+				ProcessingElement* collector,
+				std::vector<ProcessingElement*>* workers,
+				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
+
+		void wake_worker();
+
+		void idling_worker();
+
+};
 
 /////////////////////////////////////////////////////////////////////////
 //
@@ -148,13 +172,14 @@ class Collector: public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		long ts_goal;
+		const long ts_goal;
 		size_t nw; //--------------------- serve sempre atomic? levo
-		size_t max_nw;
+		const size_t max_nw;
+		std::atomic<bool> stop{false};
 		Emitter* emitter;
 		std::vector<Buffer*>* win_cbs;
 		std::vector<Worker*>* workers;
-		std::function<ssize_t(ssize_t)> fun_body;
+		const std::function<ssize_t(ssize_t)> fun_body;
 		std::vector<Buffer*>* wout_cbs;
 		Collector* collector;
 

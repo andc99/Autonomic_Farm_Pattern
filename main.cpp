@@ -32,6 +32,10 @@
 //-pulire variabili inutili
 //-pulire tipizzazioni stupide
 
+//Pro-active soluzione
+//occhio all'hyperthreading, perchè mettere tutti sullo stesso contesto non è furbo, mettere su due contesti distinti
+//poichè i contesti dell'architettura di riferimento sono 2 e ripartono da 0 al 128, allora..
+//Rapporto user time e sys time al variare della lunghezza dell'input. Con 10000, rapporto 149, cin 1000000, rapporto 102  (tutto con 2 thread) 
 //ho provato a mettere 64 thread su un unico core e farlo runnare. Il tempo è maggiore del sequenziale (ok) e non è distante dall'averlo fatto runnare solo con 1 thread (sequenziale overheadato parallelo)
 //Mostrarlo tramite grafici. Easy
 //la lambda per poter cambaire la policy nel futuro

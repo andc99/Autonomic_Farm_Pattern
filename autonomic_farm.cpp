@@ -19,6 +19,7 @@ ProcessingElement::ProcessingElement(size_t context_id){
 ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
 	delete thread;
 	delete this->context_id_lock;
+	delete this->stats_lock;
 	return;
 }
 
@@ -258,7 +259,7 @@ std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffer
 void Autonomic_Farm::manager_body(){ //non aggiungerne solo uno alla volta!
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
-	while(true){
+	while(!this->stop){
 		start_time = std::chrono::high_resolution_clock::now();
 		for(auto worker : *workers){
 			if(worker->get_in_queue()->is_bottleneck() && nw < max_nw){
@@ -274,15 +275,12 @@ void Autonomic_Farm::manager_body(){ //non aggiungerne solo uno alla volta!
 		//	std::cout << "problema" << std::endl;
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-		std::cout << act_service_time << std::endl;
 	};
 }
 
-Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection){ 
-	this->ts_goal = ts_goal;
+Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), max_nw(max_nw), fun_body(fun_body){ 
+	//fare il check che max_nw non può essere maggiore dell'hardware concurrency
 	this->nw = nw;
-	this->max_nw = max_nw;
-	this->fun_body = fun_body;
 	this->win_cbs = new std::vector<Buffer*>();
 	this->workers = new std::vector<Worker*>();
 	this->wout_cbs = new std::vector<Buffer*>();
@@ -303,11 +301,27 @@ void Autonomic_Farm::run_and_wait(){
 	this->collector->run();
 	std::thread* manager = new std::thread(&Autonomic_Farm::manager_body, this);
 	this->collector->join();
-	manager->detach();
+	this->stop = true;
+	manager->join();
 	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
 	for(size_t i = 0; i < max_nw; i++)
 		std::cout << "Worker " << (*this->workers)[i]->get_id() << ": " << (*this->workers)[i]->get_mean_service_time() << " - " << (*this->workers)[i]->get_variance_service_time() << std::endl;
 	std::cout << "Collector: " << this->collector->get_mean_service_time() << " - " << this->collector->get_variance_service_time() << std::endl;
+}
+
+//quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
+Manager::Manager(ProcessingElement* emitter,
+		ProcessingElement* collector,
+		std::vector<ProcessingElement*>* workers,
+		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : nw(nw), max_nw(max_nw), ncontexts(ncontexts), ncores(ncontexts/2), ProcessingElement(id_context){
+	this->cores = new std::vector<std::deque<ProcessingElement*>>(ncores);
+	(*this->cores)[emitter->get_context()%ncores].push_front(emitter);
+	(*this->cores)[collector->get_context()%ncores].push_front(collector);
+	(*this->cores)[this->get_context()%ncores].push_front(this); //manager
+	for(auto worker : *workers){
+		(*this->cores)[worker->get_context()%ncores].push_front(worker); //scorro i worker e li metto con la get_context
+	}
+
 }
 
 
