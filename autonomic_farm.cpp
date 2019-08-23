@@ -313,15 +313,69 @@ void Autonomic_Farm::run_and_wait(){
 Manager::Manager(ProcessingElement* emitter,
 		ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : nw(nw), max_nw(max_nw), ncontexts(ncontexts), ncores(ncontexts/2), ProcessingElement(id_context){
-	this->cores = new std::vector<std::deque<ProcessingElement*>>(ncores);
-	(*this->cores)[emitter->get_context()%ncores].push_front(emitter);
-	(*this->cores)[collector->get_context()%ncores].push_front(collector);
-	(*this->cores)[this->get_context()%ncores].push_front(this); //manager
-	for(auto worker : *workers){
-		(*this->cores)[worker->get_context()%ncores].push_front(worker); //scorro i worker e li metto con la get_context
-	}
+		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
+	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
+//voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
+	size_t x;
+	for(auto context_id = 0; context_id < ncontexts; context_id++) 
+		this->idle.push_back(context_id);
+	this->wake_worker(emitter);
+	this->wake_worker(collector); // deve andare sopra l'emitter
+	for(auto i = 0; i < nw; i++) //1 ce ne va per forza
+		this->wake_worker((*workers)[i]);
+	for(auto i = nw; i < max_nw; i++)
+	
+}
 
+
+
+
+//
+void Manager::wake_worker(ProcessingElement* pe){
+	if(nw >= max_nw){
+		std::cout << "Unable to Increase workers.\nMax is: " << max_nw << std::endl;
+		return;
+	}
+	size_t x = this->idle.front();
+	this->idle.pop_front(); //gestire il caso in cui nw sia maggiore del numero dei contesti (la coda salta male, non ci trova niente)
+	pe->set_context(x);
+	this->threads_trace[x].push(pe);
+	this->wake.push_back(x);
+	return;
+}
+
+//mettere quello sottratto in fondo
+void Manager::wake_worker2(){
+	size_t z = this->wake.back(); //guardo l'elemento in coda
+	if(this->threads_trace[z].size()>1 && this->idle.size()>0){ //la size è > 1? sì allora posso svegliare, per questo motivo però dovrei escludere collector ed emitter da questa cosa ma li accedo direttamente con il get_context
+		this->wake.pop_back();
+		this->wake.push_front(z);
+		ProcessingElement* pe = this->threads_trace[z].pop();
+		wake_worker(pe);
+	}
+	return;
+}
+
+//Assunzione: se voglio svegliarne uno, so che in coda alla wake ci sono
+//i core con un numero maggiore di di thread sopra, quindi prendo da quello l'id
+//e dall'id vado nella trace, faccio una pop e lo metto su un core libero e aggionro wake 
+//SE E SOLO SE IDLE è != da 0!!!!
+//idle non mi dice quanti worker dormono ma quanti contesti ho a disposizione!!
+//La wake queue è ordinata. in fondo i core più appesantiti e i testa quelli più leggeri
+void Manager::idle_worker(ProcessingElement* pe){
+	size_t x = this->wake.front(); //quelli con meno pesantezza li metto dietro
+	this->wake.pop_front();
+	pe->set_context(x); //lo sovrappongo ad uno già presente
+	this->threads_trace[x].push(pe);
+	this->wake.push_back(x); //li ruoto
+	return;
+}
+
+void Manager::idle_worker2(){
+	size_t z = this->wake.front();
+	if(this->threads_trace[z].size > 0 && this->wake.size>0){
+		
+	}
 }
 
 

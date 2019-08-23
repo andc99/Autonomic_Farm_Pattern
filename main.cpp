@@ -31,7 +31,11 @@
 //-enache emitter deve poter decidere di esporre la coda oppure no
 //-pulire variabili inutili
 //-pulire tipizzazioni stupide
-
+//-throughput: se la media dei ST di un worker si discosta molto dagli altri allora altra app sopra, quindi sposto
+//quello sopra deve essere controllato solo sui nw worker!!
+//-dire che più nw_max non ha senso perchè già dopo il numero di core siamo in hyperthreading
+//non troppo sicuro di quello scritto sopra, perchè quando runno, metto 8 worker ma ho già altri 2 che sono collector ed emitter quindi 10. Dicimao che nell'implmentazione, se ne metto più, prendo dagli idle
+//
 //Pro-active soluzione
 //occhio all'hyperthreading, perchè mettere tutti sullo stesso contesto non è furbo, mettere su due contesti distinti
 //poichè i contesti dell'architettura di riferimento sono 2 e ripartono da 0 al 128, allora..

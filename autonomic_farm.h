@@ -4,6 +4,7 @@
 #include <math.h>
 #include <vector>
 #include <queue>
+#include <unordered_map> 
 #include <functional>
 
 
@@ -149,8 +150,10 @@ class Collector: public ProcessingElement{
 class Manager : public ProcessingElement{
 	private:
 		size_t nw;
-		const size_t max_nw, ncontexts, ncores;
+		const size_t max_nw, ncontexts;
 		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
+		std::unordered_map<size_t, std::queue<ProcessingElement*>> threads_trace;
+		std::deque<size_t> wake, idle;
 
 	public:
 		Manager(ProcessingElement* emitter,
@@ -158,9 +161,9 @@ class Manager : public ProcessingElement{
 				std::vector<ProcessingElement*>* workers,
 				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
 
-		void wake_worker();
+		void wake_worker(ProcessingElement* pe);
 
-		void idling_worker();
+		void idle_worker(ProcessingElement* pe);
 
 };
 
