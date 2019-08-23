@@ -374,8 +374,15 @@ void Manager::idle_worker(ProcessingElement* pe){
 void Manager::idle_worker2(){
 	size_t z = this->wake.front();
 	if(this->threads_trace[z].size > 0 && this->wake.size>0){
-		
+		this->wake.pop_front();
+		this->idle.push_back(z); //ho liberato un core totalmente!
+		while(!this->threads_trace[z].empty()){
+			ProcessingElement* pe = this->threads_trace[z].front();
+			this->threads_trace[z].pop();
+			this->idle_worker(pe);
+		}
 	}
+	return;
 }
 
 
