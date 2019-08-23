@@ -150,21 +150,32 @@ class Collector: public ProcessingElement{
 class Manager : public ProcessingElement{
 	private:
 		size_t nw;
+		const long ts_goal;
+		std::atomic<bool>* stop;
+		const std::function<void(long)> get_service_time_farm;
 		const size_t max_nw, ncontexts;
 		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
-		std::unordered_map<size_t, std::queue<ProcessingElement*>> threads_trace;
+		std::unordered_map<size_t, std::deque<ProcessingElement*>> threads_trace;
 		std::deque<size_t> wake, idle;
-
-	public:
-		Manager(ProcessingElement* emitter,
-				ProcessingElement* collector,
-				std::vector<ProcessingElement*>* workers,
-				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
-
+		
 		void wake_worker(ProcessingElement* pe);
 
 		void idle_worker(ProcessingElement* pe);
 
+		void increase_degree();
+
+		void decrease_degree();
+
+	public:
+		Manager(std::function<void(long)>, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
+				ProcessingElement* collector,
+				std::vector<ProcessingElement*>* workers,
+				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
+
+		void body();
+
+		void run();
+		
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -175,10 +186,11 @@ class Manager : public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		const long ts_goal;
+		const long ts_goal; //non dovrebbe servire
 		size_t nw; //--------------------- serve sempre atomic? levo
 		const size_t max_nw;
-		std::atomic<bool> stop{false};
+		std::atomic<bool>* stop;
+		Manager* manager;
 		Emitter* emitter;
 		std::vector<Buffer*>* win_cbs;
 		std::vector<Worker*>* workers;

@@ -255,32 +255,11 @@ std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffer
 	};
 }
 
-//deve poter crescere e decrescere
-void Autonomic_Farm::manager_body(){ //non aggiungerne solo uno alla volta!
-	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	long act_service_time;
-	while(!this->stop){
-		start_time = std::chrono::high_resolution_clock::now();
-		for(auto worker : *workers){
-			if(worker->get_in_queue()->is_bottleneck() && nw < max_nw){
-				worker->set_context(nw++); //se nw = 4, allora primo contesto ok è 4 ma siccome partono da 0, prima assegno 4 e poi incremento a 5	
-			}
-		}
-		//std::cout << this->get_service_time_farm() << std::endl;
-		if(this->get_service_time_farm() > this->ts_goal && nw < max_nw){	
-			(*this->workers)[nw-1]->set_context(nw);
-			nw++;
-		}
-		//if(nw >= max_nw) //check necesssario perchè non alloco mai più di max_nw. Se lo supero segfFault perchè non esiste
-		//	std::cout << "problema" << std::endl;
-		end_time = std::chrono::high_resolution_clock::now();
-		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-	};
-}
 
 Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), max_nw(max_nw), fun_body(fun_body){ 
 	//fare il check che max_nw non può essere maggiore dell'hardware concurrency
 	this->nw = nw;
+	this->stop = new std::atomic<bool>(false);
 	this->win_cbs = new std::vector<Buffer*>();
 	this->workers = new std::vector<Worker*>();
 	this->wout_cbs = new std::vector<Buffer*>();
@@ -292,17 +271,21 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 		this->add_worker(buffer_len, i+1);
 	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
 		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
+	this->manager = new Manager(get_service_time_farm, this->ts_goal,
+			this->stop, this->emitter,
+			this->collector, this->workers,
+			nw, max_nw, (size_t) std::thread::hardware_concurrency(), (size_t) 0);
 }
 
 void Autonomic_Farm::run_and_wait(){
 	this->emitter->run();
 	for(auto worker : (*this->workers))
 		worker->run();	
-	this->collector->run();
-	std::thread* manager = new std::thread(&Autonomic_Farm::manager_body, this);
+	this->collector->run();	
+	this->manager->run();
 	this->collector->join();
-	this->stop = true;
-	manager->join();
+	*(this->stop) = true;
+	this->manager->join();
 	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
 	for(size_t i = 0; i < max_nw; i++)
 		std::cout << "Worker " << (*this->workers)[i]->get_id() << ": " << (*this->workers)[i]->get_mean_service_time() << " - " << (*this->workers)[i]->get_variance_service_time() << std::endl;
@@ -310,21 +293,22 @@ void Autonomic_Farm::run_and_wait(){
 }
 
 //quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
-Manager::Manager(ProcessingElement* emitter,
+Manager::Manager(std::function<void(long)> get_service_time_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
 		ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
+		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : get_service_time_farm(get_service_time_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
 	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
-	size_t x;
 	for(auto context_id = 0; context_id < ncontexts; context_id++) 
 		this->idle.push_back(context_id);
 	this->wake_worker(emitter);
 	this->wake_worker(collector); // deve andare sopra l'emitter
+	//this->wake_worker(this); // deve andare sopra l'emitter
 	for(auto i = 0; i < nw; i++) //1 ce ne va per forza
 		this->wake_worker((*workers)[i]);
 	for(auto i = nw; i < max_nw; i++)
-	
+		this->idle_worker((*workers)[i]);
+	return;
 }
 
 
@@ -339,18 +323,18 @@ void Manager::wake_worker(ProcessingElement* pe){
 	size_t x = this->idle.front();
 	this->idle.pop_front(); //gestire il caso in cui nw sia maggiore del numero dei contesti (la coda salta male, non ci trova niente)
 	pe->set_context(x);
-	this->threads_trace[x].push(pe);
+	this->threads_trace[x].push_front(pe);
 	this->wake.push_back(x);
 	return;
 }
 
 //mettere quello sottratto in fondo
-void Manager::wake_worker2(){
+void Manager::increase_degree(){
 	size_t z = this->wake.back(); //guardo l'elemento in coda
 	if(this->threads_trace[z].size()>1 && this->idle.size()>0){ //la size è > 1? sì allora posso svegliare, per questo motivo però dovrei escludere collector ed emitter da questa cosa ma li accedo direttamente con il get_context
 		this->wake.pop_back();
 		this->wake.push_front(z);
-		ProcessingElement* pe = this->threads_trace[z].pop();
+		ProcessingElement* pe = this->threads_trace[z].pop_front();
 		wake_worker(pe);
 	}
 	return;
@@ -366,23 +350,48 @@ void Manager::idle_worker(ProcessingElement* pe){
 	size_t x = this->wake.front(); //quelli con meno pesantezza li metto dietro
 	this->wake.pop_front();
 	pe->set_context(x); //lo sovrappongo ad uno già presente
-	this->threads_trace[x].push(pe);
+	this->threads_trace[x].push_front(pe);
 	this->wake.push_back(x); //li ruoto
 	return;
 }
 
-void Manager::idle_worker2(){
+void Manager::decrease_degree(){
 	size_t z = this->wake.front();
-	if(this->threads_trace[z].size > 0 && this->wake.size>0){
+	if(this->threads_trace[z].size() > 0 && this->wake.size() >0){
 		this->wake.pop_front();
 		this->idle.push_back(z); //ho liberato un core totalmente!
 		while(!this->threads_trace[z].empty()){
 			ProcessingElement* pe = this->threads_trace[z].front();
-			this->threads_trace[z].pop();
+			this->threads_trace[z].pop_front();
 			this->idle_worker(pe);
 		}
 	}
 	return;
 }
 
+void Manager::run(){
+	this->thread = new std::thread(&Manager::body, this);
+	return;
+}
+
+void Manager::body(){
+	std::chrono::high_resolution_clock::time_point start_time, end_time;
+	long act_service_time;
+	while(!this->stop){
+		start_time = std::chrono::high_resolution_clock::now();
+		for(auto const& [key,val] : this->threads_trace){
+			for(auto pe : val)
+				if(( (Worker) pe)->get_in_queue()->is_bottleneck()
+						this->increase_degree();
+		}
+		if(this->get_service_time_farm() > this->ts_goal){	
+			this->increase_degree();
+		}
+		end_time = std::chrono::high_resolution_clock::now();
+		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+		this->update_stats(act_service_time);
+	};
+	return;
+
+}
 
