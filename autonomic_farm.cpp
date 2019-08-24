@@ -8,12 +8,11 @@
 /////////////////////////////////////////////////////////////////////////
 
 
-ProcessingElement::ProcessingElement(size_t context_id){
+ProcessingElement::ProcessingElement(){
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
 	this->context_id_lock = new std::mutex();
 	this->stats_lock = new std::mutex();
-	this->context_id = context_id;
 }
 
 ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
@@ -92,7 +91,7 @@ long ProcessingElement::update_variance_service_time(long act_service_time, long
 //
 /////////////////////////////////////////////////////////////////////////
 
-Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection, size_t context_id) : ProcessingElement(context_id){
+Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection) : ProcessingElement(){
 	this->win_cbs = win_cbs;
 	this->emitter_cb = new BUFFER(buffer_len); 
 	this->collection = collection;
@@ -134,7 +133,7 @@ Buffer* Emitter::get_in_queue(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, size_t context_id):ProcessingElement(context_id){
+Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len):ProcessingElement(){
 	this->fun_body = fun_body;
 	this->win_cb = new BUFFER(buffer_len); 
 	this->wout_cb = new BUFFER(buffer_len); 
@@ -182,7 +181,7 @@ Buffer* Worker::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, size_t context_id):ProcessingElement(context_id){
+Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len):ProcessingElement(){
 	this->wout_cbs = wout_cbs;
 	this->collector_cb = new BUFFER(buffer_len); 
 }
@@ -225,8 +224,8 @@ Buffer* Collector::get_out_queue(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Worker* Autonomic_Farm::add_worker(size_t buffer_len, size_t context_id){ //c'è da runnarlo poi ehhhh
-	Worker* worker = new Worker(this->fun_body, buffer_len, context_id);
+Worker* Autonomic_Farm::add_worker(size_t buffer_len){ //c'è da runnarlo poi ehhhh
+	Worker* worker = new Worker(this->fun_body, buffer_len);
 	this->win_cbs->push_back(worker->get_in_queue());
 	this->wout_cbs->push_back(worker->get_out_queue());
 	(*this->workers).push_back(worker);
@@ -265,16 +264,16 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	this->wout_cbs = new std::vector<Buffer*>();
 	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, this->win_cbs);
 	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, this->wout_cbs);
-	this->emitter = new Emitter(this->win_cbs, buffer_len, collection, 0);
-	this->collector = new Collector(this->wout_cbs, buffer_len, 1);
+	this->emitter = new Emitter(this->win_cbs, buffer_len, collection);
+	this->collector = new Collector(this->wout_cbs, buffer_len);
 	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, 0);
+		this->add_worker(buffer_len);
 	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, 0);
+		this->add_worker(buffer_len);
 	this->manager = new Manager(this, this->ts_goal,
 			this->stop, this->emitter,
 			this->collector, (std::vector<ProcessingElement*>*) this->workers,
-			nw, max_nw, std::thread::hardware_concurrency(), 0);
+			nw, max_nw, std::thread::hardware_concurrency());
 }
 
 void Autonomic_Farm::run_and_wait(){
@@ -295,13 +294,13 @@ void Autonomic_Farm::run_and_wait(){
 //quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
 Manager::Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter, ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
+		size_t nw, size_t max_nw, size_t ncontexts) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(){
 	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
 	for(auto context_id = 0; context_id < ncontexts; context_id++) 
 		this->idle.push_back(context_id);
-	//this->wake_worker(emitter);
-	//this->wake_worker(collector); // deve andare sopra l'emitter
+	this->wake_worker(emitter);
+	this->wake_worker(collector); // deve andare sopra l'emitter
 	//this->wake_worker(this); // deve andare sopra l'emitter
 	std::cout << "ACTIVE" << std::endl;
 	for(auto i = 0; i < nw; i++){ //1 ce ne va per forza

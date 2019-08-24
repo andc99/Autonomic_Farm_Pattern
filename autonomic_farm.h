@@ -35,7 +35,7 @@ class Collector;
 class ProcessingElement{
 	protected:
 		size_t thread_id;
-		size_t context_id;
+		size_t context_id = 0;
 		std::thread* thread;
 		std::mutex *context_id_lock, *stats_lock;
 		long processed_elements = 0;
@@ -45,7 +45,7 @@ class ProcessingElement{
 		virtual void body() = 0;
 		virtual void run() = 0;
 
-		ProcessingElement(size_t context_id);
+		ProcessingElement();
 
 		~ProcessingElement();
 
@@ -86,7 +86,7 @@ class Emitter : public ProcessingElement{
 		std::vector<ssize_t>* collection;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection, size_t context_id);
+		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void body();
 
@@ -111,7 +111,7 @@ class Worker : public ProcessingElement{
 
 	public: 
 
-		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, size_t context_id);
+		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len);
 
 		void body();
 
@@ -136,49 +136,13 @@ class Collector: public ProcessingElement{
 		std::function<Buffer*()> next_buffer;
 
 	public:
-		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len, size_t context_id);
+		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len);
 
 		void body();
 
 		void run();
 
 		Buffer* get_out_queue();
-};
-
-
-/////////////////////////////////////////////////////////////////////////
-//
-//	Autonomic Farm	
-//
-/////////////////////////////////////////////////////////////////////////
-
-class Autonomic_Farm{
-	private:
-		const long ts_goal; //non dovrebbe servire
-		size_t nw; //--------------------- serve sempre atomic? levo
-		const size_t max_nw;
-		std::atomic<bool>* stop;
-		Manager* manager;
-		Emitter* emitter;
-		std::vector<Buffer*>* win_cbs;
-		std::vector<Worker*>* workers;
-		const std::function<ssize_t(ssize_t)> fun_body;
-		std::vector<Buffer*>* wout_cbs;
-		Collector* collector;
-
-		Worker* add_worker(size_t buffer_len, size_t nw);
-
-
-	public:
-
-		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
-
-		void run_and_wait();
-
-		long get_service_time_farm();
-		
-		//void push(I task); <-- dipende
-		//O pop();
 };
 
 
@@ -211,7 +175,7 @@ class Manager : public ProcessingElement{
 		Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
 				ProcessingElement* collector,
 				std::vector<ProcessingElement*>* workers,
-				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
+				size_t nw, size_t max_nw, size_t ncontexts);
 
 		void body();
 
@@ -219,9 +183,38 @@ class Manager : public ProcessingElement{
 		
 };
 
+/////////////////////////////////////////////////////////////////////////
+//
+//	Autonomic Farm	
+//
+/////////////////////////////////////////////////////////////////////////
+
+class Autonomic_Farm{
+	private:
+		const long ts_goal; //non dovrebbe servire
+		size_t nw; //--------------------- serve sempre atomic? levo
+		const size_t max_nw;
+		std::atomic<bool>* stop;
+		Manager* manager;
+		Emitter* emitter;
+		std::vector<Buffer*>* win_cbs;
+		std::vector<Worker*>* workers;
+		const std::function<ssize_t(ssize_t)> fun_body;
+		std::vector<Buffer*>* wout_cbs;
+		Collector* collector;
+
+		Worker* add_worker(size_t buffer_len);
 
 
+	public:
 
+		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
+		void run_and_wait();
 
+		long get_service_time_farm();
+		
+		//void push(I task); <-- dipende
+		//O pop();
+};
 
