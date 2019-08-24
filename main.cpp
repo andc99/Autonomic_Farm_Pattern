@@ -10,6 +10,7 @@
 
 
 //OGGI
+//-acneh il manager potrebe muoversi altrimenti potrebbero attaccare quel core col manager e rallentare tutto
 //-non sarebbe meglio mettere il manager come derivato di ProcessingElement?
 //-un bel body di body? Non so quanto senso abbia 
 //-mettere che max_nw non può essere modificato (const)

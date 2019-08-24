@@ -21,7 +21,11 @@
 
 #define EOS ((void*)-1)
 
-
+class Autonomic_Farm;
+class Manager;
+class Emitter;
+class Worker;
+class Collector;
 /////////////////////////////////////////////////////////////////////////
 //
 //	ProcessingElement	
@@ -141,42 +145,6 @@ class Collector: public ProcessingElement{
 		Buffer* get_out_queue();
 };
 
-/////////////////////////////////////////////////////////////////////////
-//
-//	Manager	
-//
-/////////////////////////////////////////////////////////////////////////
-
-class Manager : public ProcessingElement{
-	private:
-		size_t nw;
-		const long ts_goal;
-		std::atomic<bool>* stop;
-		const std::function<void(long)> get_service_time_farm;
-		const size_t max_nw, ncontexts;
-		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
-		std::unordered_map<size_t, std::deque<ProcessingElement*>> threads_trace;
-		std::deque<size_t> wake, idle;
-		
-		void wake_worker(ProcessingElement* pe);
-
-		void idle_worker(ProcessingElement* pe);
-
-		void increase_degree();
-
-		void decrease_degree();
-
-	public:
-		Manager(std::function<void(long)>, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
-				ProcessingElement* collector,
-				std::vector<ProcessingElement*>* workers,
-				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
-
-		void body();
-
-		void run();
-		
-};
 
 /////////////////////////////////////////////////////////////////////////
 //
@@ -200,21 +168,56 @@ class Autonomic_Farm{
 
 		Worker* add_worker(size_t buffer_len, size_t nw);
 
-		long get_service_time_farm();
-
-		void manager_body();
 
 	public:
 
 		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void run_and_wait();
+
+		long get_service_time_farm();
 		
 		//void push(I task); <-- dipende
 		//O pop();
 };
 
 
+/////////////////////////////////////////////////////////////////////////
+//
+//	Manager	
+//
+/////////////////////////////////////////////////////////////////////////
+
+class Manager : public ProcessingElement{
+	private:
+		size_t nw;
+		const long ts_goal;
+		std::atomic<bool>* stop;
+		Autonomic_Farm* autonomic_farm;
+		const size_t max_nw, ncontexts;
+		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
+		std::unordered_map<size_t, std::deque<ProcessingElement*>> threads_trace;
+		std::deque<size_t> wake, idle;
+		
+		void wake_worker(ProcessingElement* pe);
+
+		void idle_worker(ProcessingElement* pe);
+
+		void increase_degree();
+
+		void decrease_degree();
+
+	public:
+		Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
+				ProcessingElement* collector,
+				std::vector<ProcessingElement*>* workers,
+				size_t nw, size_t max_nw, size_t ncontexts, size_t id_context);
+
+		void body();
+
+		void run();
+		
+};
 
 
 

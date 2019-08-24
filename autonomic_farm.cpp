@@ -266,15 +266,15 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, this->win_cbs);
 	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, this->wout_cbs);
 	this->emitter = new Emitter(this->win_cbs, buffer_len, collection, 0);
-	this->collector = new Collector(this->wout_cbs, buffer_len, 0);
+	this->collector = new Collector(this->wout_cbs, buffer_len, 1);
 	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, i+1);
+		this->add_worker(buffer_len, 0);
 	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len, (*this->workers)[i]->get_context());
-	this->manager = new Manager(get_service_time_farm, this->ts_goal,
+		this->add_worker(buffer_len, 0);
+	this->manager = new Manager(this, this->ts_goal,
 			this->stop, this->emitter,
-			this->collector, this->workers,
-			nw, max_nw, (size_t) std::thread::hardware_concurrency(), (size_t) 0);
+			this->collector, (std::vector<ProcessingElement*>*) this->workers,
+			nw, max_nw, std::thread::hardware_concurrency(), 0);
 }
 
 void Autonomic_Farm::run_and_wait(){
@@ -293,24 +293,62 @@ void Autonomic_Farm::run_and_wait(){
 }
 
 //quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
-Manager::Manager(std::function<void(long)> get_service_time_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
-		ProcessingElement* collector,
+Manager::Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter, ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : get_service_time_farm(get_service_time_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
+		size_t nw, size_t max_nw, size_t ncontexts, size_t id_context) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(id_context){
 	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
 	for(auto context_id = 0; context_id < ncontexts; context_id++) 
 		this->idle.push_back(context_id);
-	this->wake_worker(emitter);
-	this->wake_worker(collector); // deve andare sopra l'emitter
+	//this->wake_worker(emitter);
+	//this->wake_worker(collector); // deve andare sopra l'emitter
 	//this->wake_worker(this); // deve andare sopra l'emitter
-	for(auto i = 0; i < nw; i++) //1 ce ne va per forza
+	std::cout << "ACTIVE" << std::endl;
+	for(auto i = 0; i < nw; i++){ //1 ce ne va per forza
 		this->wake_worker((*workers)[i]);
-	for(auto i = nw; i < max_nw; i++)
+		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
+	}
+	std::cout << "\nIDLE" << std::endl;
+	for(auto i = nw; i < max_nw; i++){
 		this->idle_worker((*workers)[i]);
+		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
+	}
 	return;
 }
 
+void Manager::run(){
+	this->thread = new std::thread(&Manager::body, this);
+	return;
+}
+
+void Manager::body(){
+	std::chrono::high_resolution_clock::time_point start_time, end_time;
+	long act_service_time;
+	while(!(*this->stop)){
+		int rest = rand() % 2000 + 200;
+		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
+		start_time = std::chrono::high_resolution_clock::now();
+		std::cout << "***************" << std::endl;
+		for(auto const& [key,val] : this->threads_trace){
+			for(auto pe : val)
+				std::cout << "ID: " << pe->get_id() << " --- " << pe->get_context() << std::endl;
+		}
+		/*		if(pe->get_in_queue()->is_bottleneck())
+						this->increase_degree();
+		}*/
+		long act_ts = this->autonomic_farm->get_service_time_farm();
+		std::cout << " >> " << act_ts << std::endl;
+		std::cout << " >> " << nw << std::endl;
+		if( act_ts > this->ts_goal){	
+			this->increase_degree();
+		}
+		end_time = std::chrono::high_resolution_clock::now();
+		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+		this->update_stats(act_service_time);
+	};
+	return;
+
+}
 
 
 
@@ -334,8 +372,10 @@ void Manager::increase_degree(){
 	if(this->threads_trace[z].size()>1 && this->idle.size()>0){ //la size è > 1? sì allora posso svegliare, per questo motivo però dovrei escludere collector ed emitter da questa cosa ma li accedo direttamente con il get_context
 		this->wake.pop_back();
 		this->wake.push_front(z);
-		ProcessingElement* pe = this->threads_trace[z].pop_front();
+		ProcessingElement* pe = this->threads_trace[z].front();
+		this->threads_trace[z].pop_front();
 		wake_worker(pe);
+		nw++;
 	}
 	return;
 }
@@ -364,34 +404,10 @@ void Manager::decrease_degree(){
 			ProcessingElement* pe = this->threads_trace[z].front();
 			this->threads_trace[z].pop_front();
 			this->idle_worker(pe);
+			nw--;
 		}
 	}
 	return;
 }
 
-void Manager::run(){
-	this->thread = new std::thread(&Manager::body, this);
-	return;
-}
-
-void Manager::body(){
-	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	long act_service_time;
-	while(!this->stop){
-		start_time = std::chrono::high_resolution_clock::now();
-		for(auto const& [key,val] : this->threads_trace){
-			for(auto pe : val)
-				if(( (Worker) pe)->get_in_queue()->is_bottleneck()
-						this->increase_degree();
-		}
-		if(this->get_service_time_farm() > this->ts_goal){	
-			this->increase_degree();
-		}
-		end_time = std::chrono::high_resolution_clock::now();
-		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-		this->update_stats(act_service_time);
-	};
-	return;
-
-}
 
