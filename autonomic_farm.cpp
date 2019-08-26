@@ -255,25 +255,34 @@ std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffer
 }
 
 
-Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), max_nw(max_nw), fun_body(fun_body){ 
+Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
 	//fare il check che max_nw non può essere maggiore dell'hardware concurrency
-	this->nw = nw;
+	if(nw > max_nw){
+		std::cout << "Error nw > max_nw" << std::endl;
+		return;
+	}
+	unsigned int n_contexts = std::thread::hardware_concurrency();
+	this->max_nw = max_nw;
+	this->nw = (nw < n_contexts) ? nw : n_contexts; //NO -> //caso in cui si inserisca un nw maggiore rispetto alla concurrency massima effettiva e metto i rimanenti fuori (nw - hardware_concurrency su max_nw)
+	std::cout << this->nw << std::endl;
+	std::cout << this->max_nw << std::endl;
 	this->stop = new std::atomic<bool>(false);
 	this->win_cbs = new std::vector<Buffer*>();
 	this->workers = new std::vector<Worker*>();
 	this->wout_cbs = new std::vector<Buffer*>();
+	
 	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, this->win_cbs);
 	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, this->wout_cbs);
 	this->emitter = new Emitter(this->win_cbs, buffer_len, collection);
 	this->collector = new Collector(this->wout_cbs, buffer_len);
-	for(size_t i = 0; i < nw; i++) //vanno possibilmente su core distinti tra loro
+
+	for(auto i = 0; i < this->max_nw; i++) //vanno possibilmente su core distinti tra loro
 		this->add_worker(buffer_len);
-	for(size_t i = 0; i < max_nw - nw; i++) //vanno possibilmente su core distinti tra loro
-		this->add_worker(buffer_len);
+
 	this->manager = new Manager(this, this->ts_goal,
 			this->stop, this->emitter,
 			this->collector, (std::vector<ProcessingElement*>*) this->workers,
-			nw, max_nw, std::thread::hardware_concurrency());
+			this->nw, this->max_nw, n_contexts);
 }
 
 void Autonomic_Farm::run_and_wait(){
@@ -294,24 +303,26 @@ void Autonomic_Farm::run_and_wait(){
 //quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
 Manager::Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter, ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t ncontexts) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ncontexts(ncontexts), ProcessingElement(){
+		unsigned int nw, unsigned int max_nw, unsigned int n_contexts) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
 	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
-	for(auto context_id = 0; context_id < ncontexts; context_id++) 
+	unsigned int i = 0;
+	for(auto context_id = 0; context_id < n_contexts; context_id++) 
 		this->idle.push_back(context_id);
-	this->wake_worker(emitter);
-	this->wake_worker(collector); // deve andare sopra l'emitter
+	//this->wake_worker(emitter);
+	//this->wake_worker(collector); // deve andare sopra l'emitter
 	//this->wake_worker(this); // deve andare sopra l'emitter
+	while(i < this->max_nw){
+		(i < nw) ? this->wake_worker((*workers)[i]) : this->idle_worker((*workers)[i]);
+		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
+		i++;
+	}
 	std::cout << "ACTIVE" << std::endl;
-	for(auto i = 0; i < nw; i++){ //1 ce ne va per forza
-		this->wake_worker((*workers)[i]);
-		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
-	}
+	for(auto a : this->wake)
+		std::cout << a << std::endl;
 	std::cout << "\nIDLE" << std::endl;
-	for(auto i = nw; i < max_nw; i++){
-		this->idle_worker((*workers)[i]);
-		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
-	}
+	for(auto i : this->idle)
+		std::cout << i << std::endl;
 	return;
 }
 
@@ -335,9 +346,9 @@ void Manager::body(){
 		/*		if(pe->get_in_queue()->is_bottleneck())
 						this->increase_degree();
 		}*/
+		//deve anche decrementare
 		long act_ts = this->autonomic_farm->get_service_time_farm();
 		std::cout << " >> " << act_ts << std::endl;
-		std::cout << " >> " << nw << std::endl;
 		if( act_ts > this->ts_goal){	
 			this->increase_degree();
 		}
@@ -353,29 +364,28 @@ void Manager::body(){
 
 //
 void Manager::wake_worker(ProcessingElement* pe){
-	if(nw >= max_nw){
-		std::cout << "Unable to Increase workers.\nMax is: " << max_nw << std::endl;
-		return;
-	}
 	size_t x = this->idle.front();
 	this->idle.pop_front(); //gestire il caso in cui nw sia maggiore del numero dei contesti (la coda salta male, non ci trova niente)
 	pe->set_context(x);
 	this->threads_trace[x].push_front(pe);
-	this->wake.push_back(x);
+	this->wake.push_front(x); //aiaiai
 	return;
 }
 
 //mettere quello sottratto in fondo
 void Manager::increase_degree(){
 	size_t z = this->wake.back(); //guardo l'elemento in coda
+	std::cout << " 1 " <<  (this->threads_trace[z].size()) << std::endl;
+	std::cout << " 2 " << (this->idle.size()) << std::endl;
 	if(this->threads_trace[z].size()>1 && this->idle.size()>0){ //la size è > 1? sì allora posso svegliare, per questo motivo però dovrei escludere collector ed emitter da questa cosa ma li accedo direttamente con il get_context
 		this->wake.pop_back();
-		this->wake.push_front(z);
 		ProcessingElement* pe = this->threads_trace[z].front();
 		this->threads_trace[z].pop_front();
+		this->wake.push_front(z);
 		wake_worker(pe);
 		nw++;
 	}
+	std::cout << " >> " << nw << std::endl;
 	return;
 }
 
@@ -398,13 +408,13 @@ void Manager::decrease_degree(){
 	size_t z = this->wake.front();
 	if(this->threads_trace[z].size() > 0 && this->wake.size() >0){
 		this->wake.pop_front();
-		this->idle.push_back(z); //ho liberato un core totalmente!
 		while(!this->threads_trace[z].empty()){
 			ProcessingElement* pe = this->threads_trace[z].front();
 			this->threads_trace[z].pop_front();
 			this->idle_worker(pe);
 			nw--;
 		}
+		this->idle.push_back(z); //ho liberato un core totalmente!
 	}
 	return;
 }

@@ -154,14 +154,15 @@ class Collector: public ProcessingElement{
 
 class Manager : public ProcessingElement{
 	private:
-		size_t nw;
+		unsigned int nw;
 		const long ts_goal;
 		std::atomic<bool>* stop;
 		Autonomic_Farm* autonomic_farm;
-		const size_t max_nw, ncontexts;
+		const unsigned int max_nw;
 		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
-		std::unordered_map<size_t, std::deque<ProcessingElement*>> threads_trace;
-		std::deque<size_t> wake, idle;
+		std::unordered_map<unsigned int, std::deque<ProcessingElement*>> threads_trace;
+		std::deque<unsigned int> wake;
+		std::deque<unsigned int> idle;
 		
 		void wake_worker(ProcessingElement* pe);
 
@@ -175,7 +176,7 @@ class Manager : public ProcessingElement{
 		Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
 				ProcessingElement* collector,
 				std::vector<ProcessingElement*>* workers,
-				size_t nw, size_t max_nw, size_t ncontexts);
+				unsigned int nw, unsigned int max_nw, unsigned int n_contexts);
 
 		void body();
 
@@ -192,8 +193,8 @@ class Manager : public ProcessingElement{
 class Autonomic_Farm{
 	private:
 		const long ts_goal; //non dovrebbe servire
-		size_t nw; //--------------------- serve sempre atomic? levo
-		const size_t max_nw;
+		unsigned int nw; //--------------------- serve sempre atomic? levo
+		unsigned int max_nw;
 		std::atomic<bool>* stop;
 		Manager* manager;
 		Emitter* emitter;
@@ -208,7 +209,7 @@ class Autonomic_Farm{
 
 	public:
 
-		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
+		Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void run_and_wait();
 

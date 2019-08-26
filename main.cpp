@@ -10,6 +10,8 @@
 
 
 //OGGI
+//-nw deve essere 8 e trasferire i restanti su nw_max es: nw = 10 e hw = 8 e max_nw 11 --> nw = 8 e max_nw = 13? oppure mettere che massimo arriva a 11 e nw viene buttato su 8. La seconda mi sembra più senso perchè l'utente chiede di usare al massimo 11 thread
+//-il mio caso è diverso perchè comunque alloco, l'unica differenza è che se ho hw = 8 e metto nw = 3 allora 5 mi vanno neglio idle
 //-acneh il manager potrebe muoversi altrimenti potrebbero attaccare quel core col manager e rallentare tutto
 //-non sarebbe meglio mettere il manager come derivato di ProcessingElement?
 //-un bel body di body? Non so quanto senso abbia 
