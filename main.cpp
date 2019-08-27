@@ -10,6 +10,9 @@
 
 
 //OGGI
+//-potremmo non considerare il bottleneck per aumentare ma nel caso avessimo uno stream non definito, un bottleneck potrebbe andare a restituire un errore nel momento in cui il numro degli elementi in coda supera il bound, quindi il check del bottleneck di per sè ovvia a questo problema ed indirettamente a quello del degree per il Ts
+//- discutibile mettere un botto di thread attivi per core ma quello dipende principalmente dal tipo di processore
+//più è veloce, meglio li regge quindi max_nw è il vero valore su cui deve stare attento uno quando utilizza il pattern
 //-nw deve essere 8 e trasferire i restanti su nw_max es: nw = 10 e hw = 8 e max_nw 11 --> nw = 8 e max_nw = 13? oppure mettere che massimo arriva a 11 e nw viene buttato su 8. La seconda mi sembra più senso perchè l'utente chiede di usare al massimo 11 thread
 //-il mio caso è diverso perchè comunque alloco, l'unica differenza è che se ho hw = 8 e metto nw = 3 allora 5 mi vanno neglio idle
 //-acneh il manager potrebe muoversi altrimenti potrebbero attaccare quel core col manager e rallentare tutto

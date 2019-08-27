@@ -6,7 +6,7 @@
 #include <queue>
 #include <unordered_map> 
 #include <functional>
-
+#include <set>
 
 #ifdef CB
 	#include "./buffers/circular_buffer.h"
@@ -161,8 +161,12 @@ class Manager : public ProcessingElement{
 		const unsigned int max_nw;
 		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
 		std::unordered_map<unsigned int, std::deque<ProcessingElement*>> threads_trace;
-		std::deque<unsigned int> wake;
-		std::deque<unsigned int> idle;
+		std::function<bool(unsigned int, unsigned int)> cmp = [&] (unsigned int z, unsigned int x){
+			return  this->threads_trace[z].size() >= this->threads_trace[x].size() ? 1 : -1;
+		};
+		std::deque<unsigned int> wake = std::deque<unsigned int>();
+		std::deque<unsigned int> idle = std::deque<unsigned int>();
+;
 		
 		void wake_worker(ProcessingElement* pe);
 
