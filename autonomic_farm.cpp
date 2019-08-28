@@ -300,48 +300,91 @@ void Autonomic_Farm::run_and_wait(){
 	std::cout << "Collector: " << this->collector->get_mean_service_time() << " - " << this->collector->get_variance_service_time() << std::endl;
 }
 
+
+
+
+std::deque<ProcessingElement*> Context::pes_queue = std::deque<ProcessingElement*>();
+Context::Context(unsigned id_context) : id_context(id_context){};
+
+unsigned int Context::get_n_threads(){
+	return this->trace.size();
+}
+
+void Context::move_in(ProcessingElement* pe){
+	this->trace.push_back(pe);
+	pe->set_context(this->id_context);
+	return;
+}
+
+ProcessingElement* Context::move_out(){
+	ProcessingElement* pe = this->trace.front(); 
+	this->trace.pop_front();
+	return pe;
+}
+
+void Context::resize(unsigned int size){
+	while(this->trace.size() > size){
+		ProcessingElement* pe = this->move_out();
+		Context::pes_queue.push_front(pe);
+	}
+	return;	
+} 
+
+void Context::transfer_threads_to_core(Context* context){
+	ProcessingElement* pe = NULL;
+	while(!this->trace.empty()){
+		pe = this->move_out();
+		context->move_in(pe);
+	}
+	return;
+}
+
+void Context::Redistribute(std::deque<Context*>* active_contexts, unsigned int max_nw, unsigned int nw){
+	unsigned int r = max_nw / nw;
+	unsigned int m = max_nw % nw;
+	std::cout << r << " : " << m << std::endl;
+	for(auto context : *active_contexts)
+		context->resize(r);
+	std::cout << " size " << Context::pes_queue.size() << " .. " << r+m << std::endl;	
+	ProcessingElement* pe = NULL;
+	for(auto i = 0; i < pes_queue.size(); i++){
+		pe = Context::pes_queue.front();
+		Context::pes_queue.pop_front();
+		active_contexts[i].front()->move_in(pe);
+	}
+	return;
+}
+
+
+
 //quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
 Manager::Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter, ProcessingElement* collector,
 		std::vector<ProcessingElement*>* workers,
 		unsigned int nw, unsigned int max_nw, unsigned int n_contexts) : autonomic_farm(autonomic_farm), ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
 	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
-	unsigned int i = 0, counter = 0;
-	for(auto context_id = 0; context_id < n_contexts; context_id++){
-		std::cout << "a " << this->idle.size() << std::endl;
-		this->idle.push_back(context_id);
-	}
-	//this->wake_worker(emitter);
+	for(auto id_context = 0; id_context < n_contexts; id_context++)
+		this->idle.push_back(new Context(id_context));
 	//this->wake_worker(collector); // deve andare sopra l'emitter
 	//this->wake_worker(this); // deve andare sopra l'emitter
-	bool active = true;
-	while(i < this->max_nw){
-		std::cout << active << " : " << (counter < this->nw) << std::endl;
-		if(active && counter < this->nw){
-			this->wake_worker((*workers)[i]);	
-			counter++;
-		}
-		else{
-			this->idle_worker((*workers)[i]);	
-		}
-		active = !active;
-		std::cout << "ID: " << (*workers)[i]->get_id() << " --- " << (*workers)[i]->get_context() << std::endl;
-		i++;
+	Context* context;
+	for(auto i = 0; i < nw; i++){
+		context = this->idle.front();
+		this->idle.pop_front();
+		context->move_in((*workers)[i]);
+		this->active_contexts.push_back(context);
 	}
-	std::cout << "ACTIVE" << std::endl;
-	auto it = this->wake.begin();
-	while( it != this->wake.end()){
-		std::cout << (*it) << std::endl;
-		it++;
-	}
-	std::cout << "\nIDLE" << std::endl;
-	auto it2 = this->idle.begin();
-	while( it2 != this->idle.end()){
-		std::cout << (*it2) << std::endl;
-		it2++;
-	}
+	for(auto i = nw; i < max_nw; i++) //idle
+		this->active_contexts[i%nw]->move_in((*workers)[i]);
+	//da stampare se sono distribuoiti bene	
 	return;
 }
+
+
+
+
+
+
 
 void Manager::run(){
 	this->thread = new std::thread(&Manager::body, this);
@@ -368,7 +411,7 @@ void Manager::body(){
 		long act_ts = this->autonomic_farm->get_service_time_farm();
 		//std::cout << " sss " << act_ts << std::endl;
 		if( act_ts > this->ts_goal){	
-			this->increase_degree();
+			this->wake_workers(1);
 		}
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
@@ -383,74 +426,23 @@ void Manager::body(){
 
 
 
-//
-void Manager::wake_worker(ProcessingElement* pe){
-	auto x = this->idle.front();
-	this->idle.pop_front(); //gestire il caso in cui nw sia maggiore del numero dei contesti (la coda salta male, non ci trova niente)
-	pe->set_context(x);
-	this->threads_trace[x].push_front(pe);
-	this->wake.push_front(x); //aiaiai
+//se nw è maggiore del numero dei contesti? --> gestire
+void Manager::wake_workers(unsigned int n){
+	n = (n < this->max_nw) ? n : max_nw;
+	n = (n < this->idle.size()) ? n : this->idle.size();
+	ProcessingElement* pe = NULL; 
+	for(auto i = 0; i < n; i++){
+		Context* context = this->idle.front();
+		this->idle.pop_front();
+		pe = this->active_contexts[i%this->active_contexts.size()]->move_out();
+		context->move_in(pe);
+		this->active_contexts.push_front(context);	
+		this->nw++;
+	}	
+	Context::Redistribute(&this->active_contexts, this->max_nw, this->nw);
 	return;
 }
 
-//mettere quello sottratto in fondo
-void Manager::increase_degree(){
-	auto z = this->wake.front(); //guardo l'elemento in coda
-	std::cout << " z " <<  z << std::endl;
-	std::cout << " z thread size " <<  (this->threads_trace[z].size()) << std::endl;
-	std::cout << " idle size " << (this->idle.size()) << std::endl;
-	if(this->threads_trace[z].size()>1 && this->idle.size()>0){ //la size è > 1? sì allora posso svegliare, per questo motivo però dovrei escludere collector ed emitter da questa cosa ma li accedo direttamente con il get_context
-		this->wake.pop_front();
-		ProcessingElement* pe = this->threads_trace[z].front();
-		this->threads_trace[z].pop_front();
-		this->wake.push_front(z);
-		wake_worker(pe);
-		//this->threads_trace[z].size() > this->threads_trace[this->wake.back()].size() ? this->wake.push_back(z) : this->wake.push_front(z);
-		nw++;
-	}
-	int split = (int) this->max_nw/this->nw;
-	int reminder = (int) this->max_nw%this->nw;
-	std::queue<ProcessingElement*> es;
-	for(auto it = this->wake.begin(); it != this->wake.end(); it++){
-		int c = 0;
-		int size = this->threads_trace[*it].size();
-		while(c < size - split){
-			auto el = this->threads_trace[*it].front();
-			this->threads_trace[*it].pop_front(); //context da modificare
-			es.push(el);
-			c++;
-		}
-		std::cout << " c : " << c << std::endl;
-	}
-	auto it = this->wake.begin();
-	while(!es.empty()){
-		while(this->threads_trace[*it].size() <= split){
-			if(es.empty())
-				break;
-			auto el = es.front();
-			es.pop();
-			el->set_context(*it);
-			this->threads_trace[*it].push_front(el);
-			std::cout << " size " << es.size() <<  " .. " << *it << std::endl;
-		}
-		std::advance(it, 1);
-	}
-	std::cout << "\nACTIVE" << std::endl;
-	auto it3= this->wake.begin();
-	while( it3 != this->wake.end()){
-		std::cout << (*it3) << " " << threads_trace[*it3].size() << std::endl;
-		it3++;
-	}
-	std::cout << "\nIDLE" << std::endl;
-	auto it2 = this->idle.begin();
-	while( it2 != this->idle.end()){
-		std::cout << (*it2) << " " << threads_trace[*it2].size() << std::endl;
-		it2++;
-	}
-
-
-	return;
-}
 
 //Assunzione: se voglio svegliarne uno, so che in coda alla wake ci sono
 //i core con un numero maggiore di di thread sopra, quindi prendo da quello l'id
@@ -458,28 +450,27 @@ void Manager::increase_degree(){
 //SE E SOLO SE IDLE è != da 0!!!!
 //idle non mi dice quanti worker dormono ma quanti contesti ho a disposizione!!
 //La wake queue è ordinata. in fondo i core più appesantiti e i testa quelli più leggeri
-void Manager::idle_worker(ProcessingElement* pe){
-	auto x = this->wake.front(); //quelli con meno pesantezza li metto dietro
-	this->wake.pop_front();
-	pe->set_context(x); //lo sovrappongo ad uno già presente
-	this->threads_trace[x].push_front(pe);
-	this->wake.push_back(x);
+//
+//rimuovere del tutto il contesto e rimettero su idle se vuoto
+//se non ci sono abbastanza worker da risvegliare? li prendo dal contesto successivo
+void Manager::idle_workers(unsigned int n){ // qui non dovrei aver bisogno di check sulla n
+	if (n > this->active_contexts.size())
+		std::cout << "Problema " << std::endl;
+	ProcessingElement* pe = NULL;
+	Context* context = NULL;
+	for(auto i = 0; i < n; i++){
+		context = this->active_contexts.front();
+		while(context->get_n_threads() > 0){ //più pesanti sono sul front //da vedere altrimenti c'è da mettere che parte dal fondo
+			pe = context->move_out();
+			this->active_contexts.back()->move_in(pe);
+			
+		}
+		this->active_contexts.pop_front();
+		this->idle.push_back(context);	
+	}
+	Context::Redistribute(&this->active_contexts, this->max_nw, this->nw);
 	return;
 }
 
-void Manager::decrease_degree(){
-	auto z = this->wake.end();
-	if(this->threads_trace[*z].size() > 0 && this->wake.size() >0){
-		this->wake.erase(z);
-		while(!this->threads_trace[*z].empty()){
-			ProcessingElement* pe = this->threads_trace[*z].front();
-			this->threads_trace[*z].pop_front();
-			this->idle_worker(pe);
-			nw--;
-		}
-		//this->idle.insert(z); //ho liberato un core totalmente!
-	}
-	return;
-}
 
 

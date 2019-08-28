@@ -23,6 +23,7 @@
 
 class Autonomic_Farm;
 class Manager;
+class Core;
 class Emitter;
 class Worker;
 class Collector;
@@ -151,6 +152,28 @@ class Collector: public ProcessingElement{
 //	Manager	
 //
 /////////////////////////////////////////////////////////////////////////
+class Context{
+	private:
+		static std::deque<ProcessingElement*> pes_queue;
+		const unsigned int id_context;
+		std::deque<ProcessingElement*> trace;
+		
+		void resize(unsigned int size);
+	
+	public:
+		Context(unsigned id_context);
+
+		unsigned int get_n_threads();
+
+		void move_in(ProcessingElement* pe);
+
+		ProcessingElement* move_out();
+
+		void transfer_threads_to_core(Context* context); //devo poi aggiornare gli active e idle da fuori
+		
+		static void Redistribute(std::deque<Context*>* active_contexts, unsigned int max_nw, unsigned int nw);
+
+};
 
 class Manager : public ProcessingElement{
 	private:
@@ -159,22 +182,13 @@ class Manager : public ProcessingElement{
 		std::atomic<bool>* stop;
 		Autonomic_Farm* autonomic_farm;
 		const unsigned int max_nw;
-		std::vector<std::deque<ProcessingElement*>>* cores; //ci metto anche 
-		std::unordered_map<unsigned int, std::deque<ProcessingElement*>> threads_trace;
-		std::function<bool(unsigned int, unsigned int)> cmp = [&] (unsigned int z, unsigned int x){
-			return  this->threads_trace[z].size() >= this->threads_trace[x].size() ? 1 : -1;
-		};
-		std::deque<unsigned int> wake = std::deque<unsigned int>();
-		std::deque<unsigned int> idle = std::deque<unsigned int>();
-;
+		std::deque<Context*> active_contexts = std::deque<Context*>();
+		std::deque<Context*> idle = std::deque<Context*>();
+
 		
-		void wake_worker(ProcessingElement* pe);
+		void wake_workers(unsigned int n);
 
-		void idle_worker(ProcessingElement* pe);
-
-		void increase_degree();
-
-		void decrease_degree();
+		void idle_workers(unsigned int n);
 
 	public:
 		Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
@@ -185,9 +199,7 @@ class Manager : public ProcessingElement{
 		void body();
 
 		void run();
-		
-};
-
+		}; 
 /////////////////////////////////////////////////////////////////////////
 //
 //	Autonomic Farm	
