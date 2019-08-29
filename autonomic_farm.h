@@ -59,7 +59,7 @@ class ProcessingElement{
 
 	public:
 		void join();
-
+		
 		size_t get_id();
 
 		size_t get_context();
@@ -82,18 +82,18 @@ class ProcessingElement{
 
 class Emitter : public ProcessingElement{
 	private:
-		std::vector<Buffer*>* win_cbs; //input queues to workers
-		Buffer* emitter_cb; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
+		std::vector<Buffer*>* win_bfs; //input queues to workers
+		Buffer* emitter_buffer; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
 		std::vector<ssize_t>* collection;
 
 	public:
-		Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection);
+		Emitter(std::vector<Buffer*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void body();
 
 		void run();
 
-		Buffer* get_in_queue();
+		Buffer* get_in_buffer();
 
 };
 
@@ -107,8 +107,8 @@ class Emitter : public ProcessingElement{
 class Worker : public ProcessingElement{
 	private:
 		std::function<ssize_t(ssize_t)> fun_body;
-		Buffer* win_cb;
-		Buffer* wout_cb;
+		Buffer* win_bf;
+		Buffer* wout_bf;
 
 	public: 
 
@@ -118,9 +118,9 @@ class Worker : public ProcessingElement{
 
 		void run();
 
-		Buffer* get_in_queue();
+		Buffer* get_in_buffer();
 
-		Buffer* get_out_queue();
+		Buffer* get_out_buffer();
 };
 
 
@@ -132,33 +132,30 @@ class Worker : public ProcessingElement{
 
 class Collector: public ProcessingElement{
 	private:
-		std::vector<Buffer*>* wout_cbs;
-		Buffer* collector_cb;
+		std::vector<Buffer*>* wout_bfs;
+		Buffer* collector_buffer;
 		std::function<Buffer*()> next_buffer;
 
 	public:
-		Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len);
+		Collector(std::vector<Buffer*>* wout_bfs, size_t buffer_len);
 
 		void body();
 
 		void run();
 
-		Buffer* get_out_queue();
+		Buffer* get_out_buffer();
 };
 
 
 /////////////////////////////////////////////////////////////////////////
 //
-//	Manager	
+//	Context	
 //
 /////////////////////////////////////////////////////////////////////////
 class Context{
 	private:
-		static std::deque<ProcessingElement*> pes_queue;
 		const unsigned int id_context;
-		std::deque<ProcessingElement*> trace;
-		
-		void resize(unsigned int size);
+		std::deque<ProcessingElement*> trace;	
 	
 	public:
 		Context(unsigned id_context);
@@ -167,41 +164,60 @@ class Context{
 
 		unsigned int get_n_threads();
 
+		std::deque<ProcessingElement*> get_trace();
+
 		void move_in(ProcessingElement* pe);
 
 		ProcessingElement* move_out();
 
-		void transfer_threads_to_core(Context* context); //devo poi aggiornare gli active e idle da fuori
-		
-		static void Redistribute(std::deque<Context*>* active_contexts, unsigned int max_nw, unsigned int nw);
-
 };
+
+
+/////////////////////////////////////////////////////////////////////////
+//
+//	Manager	
+//
+/////////////////////////////////////////////////////////////////////////
+
 
 class Manager : public ProcessingElement{
 	private:
 		unsigned int nw;
 		const long ts_goal;
-		std::atomic<bool>* stop;
-		Autonomic_Farm* autonomic_farm;
 		const unsigned int max_nw;
+		std::atomic<bool>* stop;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
 		std::deque<Context*> idle = std::deque<Context*>();
+		Emitter* emitter;
+		Collector* collector;
+		std::deque<ProcessingElement*> pes_queue;
 
 		
 		void wake_workers(unsigned int n);
 
 		void idle_workers(unsigned int n);
+		
+		long get_service_time_farm();
+
+		void transfer_threads_to_core(Context* from, Context* to); 
+		
+		void redistribute();
+
+		void resize(Context* context, unsigned int size);
 
 	public:
-		Manager(Autonomic_Farm* autonomic_farm, long ts_goal, std::atomic<bool>* stop, ProcessingElement* emitter,
-				ProcessingElement* collector,
+		Manager(long ts_goal, std::atomic<bool>* stop,
+				Emitter* emitter,
+				Collector* collector,
 				std::vector<ProcessingElement*>* workers,
 				unsigned int nw, unsigned int max_nw, unsigned int n_contexts);
 
 		void body();
 
 		void run();
-		}; 
+
+}; 
+
 /////////////////////////////////////////////////////////////////////////
 //
 //	Autonomic Farm	
@@ -211,18 +227,15 @@ class Manager : public ProcessingElement{
 class Autonomic_Farm{
 	private:
 		const long ts_goal; //non dovrebbe servire
-		unsigned int nw; //--------------------- serve sempre atomic? levo
+		const std::function<ssize_t(ssize_t)> fun_body;
 		unsigned int max_nw;
 		std::atomic<bool>* stop;
 		Manager* manager;
 		Emitter* emitter;
-		std::vector<Buffer*>* win_cbs;
 		std::vector<Worker*>* workers;
-		const std::function<ssize_t(ssize_t)> fun_body;
-		std::vector<Buffer*>* wout_cbs;
 		Collector* collector;
 
-		Worker* add_worker(size_t buffer_len);
+		Worker* add_worker(std::vector<Buffer*>* win_bfs, std::vector<Buffer*>* wout_bfs, size_t buffer_len);
 
 
 	public:
@@ -231,7 +244,6 @@ class Autonomic_Farm{
 
 		void run_and_wait();
 
-		long get_service_time_farm();
 		
 		//void push(I task); <-- dipende
 		//O pop();

@@ -91,9 +91,9 @@ long ProcessingElement::update_variance_service_time(long act_service_time, long
 //
 /////////////////////////////////////////////////////////////////////////
 
-Emitter::Emitter(std::vector<Buffer*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection) : ProcessingElement(){
-	this->win_bfs = win_bfs;
-	this->emitter_buffer = new BUFFER(buffer_len); 
+Emitter::Emitter(std::vector<Buffer*>* win_cbs, size_t buffer_len, std::vector<ssize_t>* collection) : ProcessingElement(){
+	this->win_cbs = win_cbs;
+	this->emitter_cb = new BUFFER(buffer_len); 
 	this->collection = collection;
 }
 
@@ -104,15 +104,15 @@ void Emitter::body(){
 	for(size_t i = 0; i < (*collection).size(); i++){
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &task = (*collection)[i];
-		(*win_bfs)[id_queue]->safe_push(&task); //safe_try!!!!
-		id_queue = (++id_queue)%win_bfs->size();	
+		(*win_cbs)[id_queue]->safe_push(&task); //safe_try!!!!
+		id_queue = (++id_queue)%win_cbs->size();	
 		if (this->get_context() != sched_getcpu())
 			move_to_context(get_context());
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
 	}
-	for(auto win_cb : *(this->win_bfs))
+	for(auto win_cb : *(this->win_cbs))
 		win_cb->safe_push(EOS); // qui non ci può andare la safe_try
 	return;
 }
@@ -122,8 +122,8 @@ void Emitter::run(){
 	return;
 }
 
-Buffer* Emitter::get_in_buffer(){
-	return this->emitter_buffer;
+Buffer* Emitter::get_in_queue(){
+	return this->emitter_cb;
 }
 
 
@@ -136,28 +136,28 @@ Buffer* Emitter::get_in_buffer(){
 
 Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len):ProcessingElement(){
 	this->fun_body = fun_body;
-	this->win_bf = new BUFFER(buffer_len); 
-	this->wout_bf = new BUFFER(buffer_len); 
+	this->win_cb = new BUFFER(buffer_len); 
+	this->wout_cb = new BUFFER(buffer_len); 
 };
 
 void Worker::body(){
 	void* task = 0;
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	this->win_bf->safe_pop(&task);
+	this->win_cb->safe_pop(&task);
 	while( task != EOS){ 
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &t = (*((ssize_t*) task));
 		t = (fun_body(t));
-		this->wout_bf->safe_push(&t); //safe_try
-		this->win_bf->safe_pop(&task);	
+		this->wout_cb->safe_push(&t); //safe_try
+		this->win_cb->safe_pop(&task);	
 		if (this->get_context() != sched_getcpu())
 			move_to_context(this->get_context());
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
 	};
-	this->wout_bf->safe_push(EOS);
+	this->wout_cb->safe_push(EOS);
 	return;
 }
 
@@ -167,12 +167,12 @@ void Worker::run(){
 }
 
 
-Buffer* Worker::get_in_buffer(){
-	return this->win_bf;
+Buffer* Worker::get_in_queue(){
+	return this->win_cb;
 }
 
-Buffer* Worker::get_out_buffer(){
-	return this->wout_bf;
+Buffer* Worker::get_out_queue(){
+	return this->wout_cb;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -181,9 +181,9 @@ Buffer* Worker::get_out_buffer(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<Buffer*>* wout_bfs, size_t buffer_len):ProcessingElement(){
-	this->wout_bfs = wout_bfs;
-	this->collector_buffer = new BUFFER(buffer_len); 
+Collector::Collector(std::vector<Buffer*>* wout_cbs, size_t buffer_len):ProcessingElement(){
+	this->wout_cbs = wout_cbs;
+	this->collector_cb = new BUFFER(buffer_len); 
 }
 
 void Collector::body(){
@@ -191,14 +191,14 @@ void Collector::body(){
 	size_t id_queue{0};
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	(*wout_bfs)[id_queue]->safe_pop(&task);
+	(*wout_cbs)[id_queue]->safe_pop(&task);
 	size_t eos_counter = (task == EOS) ? 1 : 0;
-	while(eos_counter < (*wout_bfs).size()){ 
+	while(eos_counter < (*wout_cbs).size()){ 
 		start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &t = (*((ssize_t*) task));
 		//this->collector_cb->safe_push(&t); //safe_try
-		id_queue = (++id_queue)%wout_bfs->size();
-		(*wout_bfs)[id_queue]->safe_pop(&task);
+		id_queue = (++id_queue)%wout_cbs->size();
+		(*wout_cbs)[id_queue]->safe_pop(&task);
 		eos_counter += (task == EOS) ? 1 : 0;
 		if (this->get_context() != sched_getcpu())
 			move_to_context(get_context());
@@ -206,7 +206,7 @@ void Collector::body(){
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
 	};
-	this->collector_buffer->safe_push(EOS);
+	this->collector_cb->safe_push(EOS);
 	return;
 }
 
@@ -215,17 +215,87 @@ void Collector::run(){
 	return;
 }
 
-Buffer* Collector::get_out_buffer(){
-	return this->collector_buffer;
+Buffer* Collector::get_out_queue(){
+	return this->collector_cb;
+}
+
+/////////////////////////////////////////////////////////////////////////
+//
+//	Autonomic Farm	
+//
+/////////////////////////////////////////////////////////////////////////
+
+Worker* Autonomic_Farm::add_worker(size_t buffer_len){ 
+	Worker* worker = new Worker(this->fun_body, buffer_len);
+	this->win_cbs->push_back(worker->get_in_queue());
+	this->wout_cbs->push_back(worker->get_out_queue());
+	(*this->workers).push_back(worker);
+	return worker;
+}
+
+//passare come parametro questoooo
+std::function<Buffer*()> next_buffer(size_t max_nw, std::vector<Buffer*>* buffers){
+	size_t id_queue{0};
+	return [&id_queue, max_nw, buffers]() mutable {
+		id_queue = (id_queue < max_nw) ? ++id_queue : id_queue = 0;	
+		return (*buffers)[id_queue];
+	};
 }
 
 
-/////////////////////////////////////////////////////////////////////////
-//
-//	Context	
-//
-/////////////////////////////////////////////////////////////////////////
+Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
+	//fare il check che max_nw non può essere maggiore dell'hardware concurrency
+	if(nw > max_nw){
+		std::cout << "Error nw > max_nw" << std::endl;
+		return;
+	}
+	if(ts_goal == 0){
+		std::cout << "ts_goal is 0" << std::endl;
+		return;
+	}
+	unsigned int n_contexts = std::thread::hardware_concurrency();
+	this->max_nw = max_nw;
+	this->nw = (nw < n_contexts) ? nw : n_contexts; //NO -> //caso in cui si inserisca un nw maggiore rispetto alla concurrency massima effettiva e metto i rimanenti fuori (nw - hardware_concurrency su max_nw)
+	std::cout << this->nw << std::endl;
+	std::cout << this->max_nw << std::endl;
+	this->stop = new std::atomic<bool>(false);
+	this->win_cbs = new std::vector<Buffer*>();
+	this->workers = new std::vector<Worker*>();
+	this->wout_cbs = new std::vector<Buffer*>();
+	
+	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, this->win_cbs);
+	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, this->wout_cbs);
+	this->emitter = new Emitter(this->win_cbs, buffer_len, collection);
+	this->collector = new Collector(this->wout_cbs, buffer_len);
 
+	for(auto i = 0; i < this->max_nw; i++) //vanno possibilmente su core distinti tra loro
+		this->add_worker(buffer_len);
+
+	this->manager = new Manager(this->ts_goal,
+			this->stop, this->emitter,
+			this->collector, (std::vector<ProcessingElement*>*) this->workers,
+			this->nw, this->max_nw, n_contexts);
+}
+
+void Autonomic_Farm::run_and_wait(){
+	this->emitter->run();
+	for(auto worker : (*this->workers))
+		worker->run();	
+	this->collector->run();	
+	this->manager->run();
+	this->collector->join();
+	*(this->stop) = true;
+	this->manager->join();
+	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
+	for(size_t i = 0; i < max_nw; i++)
+		std::cout << "Worker " << (*this->workers)[i]->get_id() << ": " << (*this->workers)[i]->get_mean_service_time() << " - " << (*this->workers)[i]->get_variance_service_time() << std::endl;
+	std::cout << "Collector: " << this->collector->get_mean_service_time() << " - " << this->collector->get_variance_service_time() << std::endl;
+}
+
+
+
+
+std::deque<ProcessingElement*> Context::pes_queue = std::deque<ProcessingElement*>();
 Context::Context(unsigned id_context) : id_context(id_context){};
 
 unsigned int Context::get_id_context(){
@@ -234,10 +304,6 @@ unsigned int Context::get_id_context(){
 
 unsigned int Context::get_n_threads(){
 	return this->trace.size();
-}
-
-std::deque<ProcessingElement*> Context::get_trace(){
-	return this->trace;
 }
 
 void Context::move_in(ProcessingElement* pe){
@@ -252,80 +318,58 @@ ProcessingElement* Context::move_out(){
 	return pe;
 }
 
-/////////////////////////////////////////////////////////////////////////
-//
-//	Manager	
-//
-/////////////////////////////////////////////////////////////////////////
-
-
-//se nw è maggiore del numero dei contesti? --> gestire
-void Manager::wake_workers(unsigned int n){
-	n = (n < this->max_nw-this->nw) ? n : max_nw-this->nw;
-	n = (n < this->idle.size()) ? n : this->idle.size();
-	ProcessingElement* pe = NULL; 
-	Context *act_context, *idle_context;
-	for(auto i = 0; i < n; i++){
-		idle_context = this->idle.front();
-		this->idle.pop_front();
-		act_context = this->active_contexts.front();
-		this->active_contexts.pop_front();
-		pe = act_context->move_out();
-		idle_context->move_in(pe);
-		this->active_contexts.push_front(idle_context);	
-		this->active_contexts.push_back(act_context);
-		this->nw++;
-	}	
-	this->redistribute();
-	return;
-}
-
-//rimuovere del tutto il contesto e rimettero su idle se vuoto
-//se non ci sono abbastanza worker da risvegliare? li prendo dal contesto successivo
-void Manager::idle_workers(unsigned int n){ // qui non dovrei aver bisogno di check sulla n
-	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio uno sveglio
-	ProcessingElement* pe = NULL;
-	Context *act_context, *idle_context;
-	for(auto i = 0; i < n; i++){
-		idle_context = this->active_contexts.back();
-		this->active_contexts.pop_back();
-		while(idle_context->get_n_threads() > 0){ //più pesanti sono sul front //da vedere altrimenti c'è da mettere che parte dal fondo
-			pe = idle_context->move_out();
-			act_context = this->active_contexts.front();
-			act_context->move_in(pe);
-			this->active_contexts.pop_front();
-			this->active_contexts.push_back(act_context); //per far ruotare su chi li distribuisco
-			
-		}
-		this->idle.push_back(idle_context);	
-		this->nw--;
+void Context::resize(unsigned int size){
+	while(this->trace.size() > size){
+		ProcessingElement* pe = this->move_out();
+		Context::pes_queue.push_front(pe);
 	}
-	this->redistribute();
+	return;	
+} 
+
+void Context::transfer_threads_to_core(Context* context){
+	ProcessingElement* pe = NULL;
+	while(!this->trace.empty()){
+		pe = this->move_out();
+		context->move_in(pe);
+	}
+	return;
+}
+
+void Context::Redistribute(std::deque<Context*>* active_contexts, unsigned int max_nw, unsigned int nw){
+	unsigned int r = max_nw / nw;
+	unsigned int m = max_nw % nw;
+	for(auto context : *active_contexts)
+		context->resize(r);
+	ProcessingElement* pe = NULL;
+	for(auto context : *active_contexts){
+		while(context->get_n_threads() < r){
+			pe = Context::pes_queue.front();
+			Context::pes_queue.pop_front();
+			context->move_in(pe);
+		}
+	}
+	Context* context;
+	while(!Context::pes_queue.empty()){
+		pe = Context::pes_queue.front();
+		Context::pes_queue.pop_front();
+		active_contexts->front()->move_in(pe);
+		context = active_contexts->front();
+		active_contexts->pop_front();
+		active_contexts->push_back(context);
+	}
 	return;
 }
 
 
-long Manager::get_service_time_farm(){
-	long mean_service_time_workers = 0;
-	for(auto context : this->active_contexts) //a sto punto ce li ho divisi per contesto ehh ottimizzazioni?
-		for(auto worker : context->get_trace())
-			mean_service_time_workers+=worker->get_mean_service_time();
-	mean_service_time_workers/=this->max_nw;
-	return std::max({this->emitter->get_mean_service_time(),
-			this->collector->get_mean_service_time(),
-			mean_service_time_workers/static_cast<long>(this->nw)});//questo è nw perchè sono quelli effittivi
-			//castato max_nw a long... fare check sui tipi eh
-}
 
-
-
-//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
-//voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
+//quando faccio la set_context devo anche vedere se su quella deque c'è già un elemento, perchè in quel caso, sì aumento ma sono in hyperthreading
 Manager::Manager(long ts_goal, std::atomic<bool>* stop, Emitter* emitter, Collector* collector,
 		std::vector<ProcessingElement*>* workers,
 		unsigned int nw, unsigned int max_nw, unsigned int n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
+	//il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
 	this->emitter = emitter;
 	this->collector = collector;
+//voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
 		this->idle.push_back(new Context(id_context));
 	//this->wake_worker(collector); // deve andare sopra l'emitter
@@ -337,62 +381,31 @@ Manager::Manager(long ts_goal, std::atomic<bool>* stop, Emitter* emitter, Collec
 		context->move_in((*workers)[i]);
 		this->active_contexts.push_back(context);
 	}
-	for(auto i = nw; i < max_nw; i++) 
+	for(auto i = nw; i < max_nw; i++) //idle
 		this->active_contexts[i%nw]->move_in((*workers)[i]);
+	//da stampare se sono distribuoiti bene	
 	return;
 }
 
-//devo poi aggiornare gli active e gli idle!
-void Manager::transfer_threads_to_core(Context* from, Context* to){
-	ProcessingElement* pe = NULL;
-	while(!from->get_trace().empty()){
-		pe = from->move_out();
-		to->move_in(pe);
-	}
+
+
+
+std::deque<ProcessingElement*> Context::get_trace(){
+	return this->trace;
+}
+
+
+void Manager::run(){
+	this->thread = new std::thread(&Manager::body, this);
 	return;
 }
-
-void Manager::redistribute(){
-	unsigned int r = this->max_nw / this->nw;
-	unsigned int m = this->max_nw % this->nw;
-	for(auto context : this->active_contexts)
-		this->resize(context, r);
-	ProcessingElement* pe = NULL;
-	for(auto context : this->active_contexts){
-		while(context->get_n_threads() < r){
-			pe = this->pes_queue.front();
-			this->pes_queue.pop_front();
-			context->move_in(pe);
-		}
-	}
-	Context* context;
-	while(!this->pes_queue.empty()){
-		pe = this->pes_queue.front();
-		this->pes_queue.pop_front();
-		this->active_contexts.front()->move_in(pe);
-		context = this->active_contexts.front();
-		this->active_contexts.pop_front();
-		this->active_contexts.push_back(context);
-	}
-	return;
-}
-
-void Manager::resize(Context* context, unsigned int size){
-	while(context->get_n_threads() > size){
-		ProcessingElement* pe = context->move_out();
-		this->pes_queue.push_front(pe);
-	}
-	return;	
-}
-
-
 //c'è un caso dove smette di scalare: quello in cui in testa ha un elemento da 1 solo thread dentro:w
 //
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
 	while(!(*this->stop)){
-		int rest =  rand() % 1200 + 200;
+		int rest = rand() % 2000 + 200;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
 				//for(auto const& [key,val] : this->threads_trace){
@@ -439,80 +452,66 @@ void Manager::body(){
 
 }
 
-void Manager::run(){
-	this->thread = new std::thread(&Manager::body, this);
+
+
+//se nw è maggiore del numero dei contesti? --> gestire
+void Manager::wake_workers(unsigned int n){
+	n = (n < this->max_nw-this->nw) ? n : max_nw-this->nw;
+	n = (n < this->idle.size()) ? n : this->idle.size();
+	ProcessingElement* pe = NULL; 
+	Context *act_context, *idle_context;
+	for(auto i = 0; i < n; i++){
+		idle_context = this->idle.front();
+		this->idle.pop_front();
+		act_context = this->active_contexts.front();
+		this->active_contexts.pop_front();
+		pe = act_context->move_out();
+		idle_context->move_in(pe);
+		this->active_contexts.push_front(idle_context);	
+		this->active_contexts.push_back(act_context);
+		this->nw++;
+	}	
+	Context::Redistribute(&this->active_contexts, this->max_nw, this->nw);
 	return;
 }
 
-/////////////////////////////////////////////////////////////////////////
-//
-//	Autonomic Farm	
-//
-/////////////////////////////////////////////////////////////////////////
-//passare come parametro questoooo
-std::function<Buffer*()> next_buffer(unsigned int max_nw, std::vector<Buffer*>* buffers){
-	size_t id_queue{0};
-	return [&id_queue, max_nw, buffers]() mutable {
-		id_queue = (id_queue < max_nw) ? ++id_queue : id_queue = 0;	
-		return (*buffers)[id_queue];
-	};
-}
 
-Worker* Autonomic_Farm::add_worker(std::vector<Buffer*>* win_bfs, std::vector<Buffer*>* wout_bfs, size_t buffer_len){ 
-	Worker* worker = new Worker(this->fun_body, buffer_len);
-	win_bfs->push_back(worker->get_in_buffer());
-	wout_bfs->push_back(worker->get_out_buffer());
-	(*this->workers).push_back(worker);
-	return worker;
-}
-
-Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
-	if(nw > max_nw){
-		std::cout << "Error nw > max_nw" << std::endl;
-		return;
+//rimuovere del tutto il contesto e rimettero su idle se vuoto
+//se non ci sono abbastanza worker da risvegliare? li prendo dal contesto successivo
+void Manager::idle_workers(unsigned int n){ // qui non dovrei aver bisogno di check sulla n
+	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio uno sveglio
+	ProcessingElement* pe = NULL;
+	Context *act_context, *idle_context;
+	for(auto i = 0; i < n; i++){
+		idle_context = this->active_contexts.back();
+		this->active_contexts.pop_back();
+		while(idle_context->get_n_threads() > 0){ //più pesanti sono sul front //da vedere altrimenti c'è da mettere che parte dal fondo
+			pe = idle_context->move_out();
+			act_context = this->active_contexts.front();
+			act_context->move_in(pe);
+			this->active_contexts.pop_front();
+			this->active_contexts.push_back(act_context); //per far ruotare su chi li distribuisco
+			
+		}
+		this->idle.push_back(idle_context);	
+		this->nw--;
 	}
-	if(ts_goal == 0){
-		std::cout << "ts_goal is 0" << std::endl;
-		return;
-	}
-	unsigned int n_contexts = std::thread::hardware_concurrency();
-	nw = (nw < n_contexts) ? nw : n_contexts; 
-	this->max_nw = (max_nw < n_contexts) ? max_nw : n_contexts;
-	std::cout << nw << std::endl;
-	std::cout << this->max_nw << std::endl;
-	this->stop = new std::atomic<bool>(false);
-	std::vector<Buffer*>* win_bfs = new std::vector<Buffer*>();
-	this->workers = new std::vector<Worker*>();
-	std::vector<Buffer*>* wout_bfs = new std::vector<Buffer*>();	
-	std::function<Buffer*()> emitter_next_buffer = next_buffer(this->max_nw, win_bfs);
-	std::function<Buffer*()> collector_next_buffer = next_buffer(this->max_nw, wout_bfs);
-	this->emitter = new Emitter(win_bfs, buffer_len, collection);
-	this->collector = new Collector(wout_bfs, buffer_len);
-
-	for(auto i = 0; i < this->max_nw; i++) 
-		this->add_worker(win_bfs, wout_bfs, buffer_len);
-
-	this->manager = new Manager(this->ts_goal,
-			this->stop, this->emitter,
-			this->collector, (std::vector<ProcessingElement*>*) this->workers,
-			nw, this->max_nw, n_contexts);
+	Context::Redistribute(&this->active_contexts, this->max_nw, this->nw);
+	return;
 }
 
-void Autonomic_Farm::run_and_wait(){
-	this->emitter->run();
-	for(auto worker : (*this->workers))
-		worker->run();	
-	this->manager->run();
-	this->collector->run();	
-	for(auto worker : (*this->workers))
-		worker->join();	
-	this->collector->join();
-	*(this->stop) = true;
-	this->manager->join();
-	std::cout << "Emitter: " << this->emitter->get_mean_service_time() << " - " << this->emitter->get_variance_service_time() << std::endl;
-	for(auto worker : (*this->workers))
-		std::cout << "Worker " << worker->get_id() << ": " << worker->get_mean_service_time() << " - " << worker->get_variance_service_time() << std::endl;
-	std::cout << "Collector: " << this->collector->get_mean_service_time() << " - " << this->collector->get_variance_service_time() << std::endl;
+
+long Manager::get_service_time_farm(){
+	long mean_service_time_workers = 0;
+	for(auto context : this->active_contexts) //a sto punto ce li ho divisi per contesto ehh ottimizzazioni?
+		for(auto worker : context->get_trace())
+			mean_service_time_workers+=worker->get_mean_service_time();
+	mean_service_time_workers/=this->max_nw;
+	return std::max({this->emitter->get_mean_service_time(),
+			this->collector->get_mean_service_time(),
+			mean_service_time_workers/static_cast<long>(this->nw)});//questo è nw perchè sono quelli effittivi
+			//castato max_nw a long... fare check sui tipi eh
 }
+
 
 
