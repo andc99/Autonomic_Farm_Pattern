@@ -51,7 +51,7 @@ ssize_t ProcessingElement::move_to_context(size_t id_context){
 	ssize_t error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 	if (error != 0)
 		std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
-	this->context_id = id_context; //se errore non assegnare. Cambiare nome variabile
+	this->set_context(id_context); //se errore non assegnare. Cambiare nome variabile
 	return error;
 }
 
@@ -143,7 +143,7 @@ void Worker::body(){
 	void* task = 0;
 	long act_service_time = 0;
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	this->move_to_context(get_context());
+	//this->move_to_context(get_context());
 	this->win_cb->safe_pop(&task);
 	while( task != EOS){ 
 		start_time = std::chrono::high_resolution_clock::now();
@@ -261,6 +261,10 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_n
 		std::cout << "Error nw > max_nw" << std::endl;
 		return;
 	}
+	if(ts_goal == 0){
+		std::cout << "ts_goal is 0" << std::endl;
+		return;
+	}
 	unsigned int n_contexts = std::thread::hardware_concurrency();
 	this->max_nw = max_nw;
 	this->nw = (nw < n_contexts) ? nw : n_contexts; //NO -> //caso in cui si inserisca un nw maggiore rispetto alla concurrency massima effettiva e metto i rimanenti fuori (nw - hardware_concurrency su max_nw)
@@ -306,6 +310,10 @@ void Autonomic_Farm::run_and_wait(){
 std::deque<ProcessingElement*> Context::pes_queue = std::deque<ProcessingElement*>();
 Context::Context(unsigned id_context) : id_context(id_context){};
 
+unsigned int Context::get_id_context(){
+	return this->id_context;
+}
+
 unsigned int Context::get_n_threads(){
 	return this->trace.size();
 }
@@ -343,14 +351,27 @@ void Context::Redistribute(std::deque<Context*>* active_contexts, unsigned int m
 	unsigned int r = max_nw / nw;
 	unsigned int m = max_nw % nw;
 	std::cout << r << " : " << m << std::endl;
-	for(auto context : *active_contexts)
+	for(auto context : *active_contexts){
 		context->resize(r);
-	std::cout << " size " << Context::pes_queue.size() << " .. " << r+m << std::endl;	
+		std::cout << context->get_id_context() << " size " << context->get_n_threads() << std::endl;
+	}
 	ProcessingElement* pe = NULL;
-	for(auto i = 0; i < pes_queue.size(); i++){
+	for(auto context : *active_contexts){
+		while(context->get_n_threads() < r){
+			pe = Context::pes_queue.front();
+			Context::pes_queue.pop_front();
+			context->move_in(pe);
+		}
+	}
+	std::cout << " size " << Context::pes_queue.size() << " .. " << m << std::endl;	
+	Context* context;
+	while(!Context::pes_queue.empty()){
 		pe = Context::pes_queue.front();
 		Context::pes_queue.pop_front();
-		active_contexts[i].front()->move_in(pe);
+		active_contexts->front()->move_in(pe);
+		context = active_contexts->front();
+		active_contexts->pop_front();
+		active_contexts->push_back(context);
 	}
 	return;
 }
@@ -408,10 +429,19 @@ void Manager::body(){
 		}*/
 		//deve anche decrementare
 		std::cout << "\n***************" << std::endl;
+		std::cout << " ACTIVE " << std::endl;
+		for(auto i = 0; i < this->active_contexts.size(); i++)
+			std::cout << this->active_contexts[i]->get_id_context() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
+		std::cout << " IDLE " << std::endl;
+		for(auto i = 0; i < this->idle.size(); i++)
+			std::cout << this->idle[i]->get_id_context() << " - " << this->idle[i]->get_n_threads() << std::endl;
+		std::cout << " -------- " << std::endl;
 		long act_ts = this->autonomic_farm->get_service_time_farm();
 		//std::cout << " sss " << act_ts << std::endl;
 		if( act_ts > this->ts_goal){	
-			this->wake_workers(1);
+			unsigned int n = act_ts/ts_goal;
+			std::cout << " increased " << n << std::endl;
+			this->wake_workers(n);
 		}
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
@@ -428,15 +458,20 @@ void Manager::body(){
 
 //se nw è maggiore del numero dei contesti? --> gestire
 void Manager::wake_workers(unsigned int n){
-	n = (n < this->max_nw) ? n : max_nw;
+	n = (n < this->max_nw-this->nw) ? n : max_nw-this->nw;
 	n = (n < this->idle.size()) ? n : this->idle.size();
+	std::cout << "act increased " << n << std::endl;
 	ProcessingElement* pe = NULL; 
+	Context *act_context, *idle_context;
 	for(auto i = 0; i < n; i++){
-		Context* context = this->idle.front();
+		idle_context = this->idle.front();
 		this->idle.pop_front();
-		pe = this->active_contexts[i%this->active_contexts.size()]->move_out();
-		context->move_in(pe);
-		this->active_contexts.push_front(context);	
+		act_context = this->active_contexts.front();
+		pe = act_context->move_out();
+		this->active_contexts.pop_front();
+		this->active_contexts.push_back(act_context);
+		idle_context->move_in(pe);
+		this->active_contexts.push_front(idle_context);	
 		this->nw++;
 	}	
 	Context::Redistribute(&this->active_contexts, this->max_nw, this->nw);

@@ -163,6 +163,8 @@ class Context{
 	public:
 		Context(unsigned id_context);
 
+		unsigned int get_id_context();
+
 		unsigned int get_n_threads();
 
 		void move_in(ProcessingElement* pe);
