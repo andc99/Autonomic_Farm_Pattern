@@ -13,9 +13,11 @@ class Circular_Buffer : public Lock_Buffer{
 
 		bool safe_push(void* const task);
 
-		//bool try_safe_push(void* const task); //if false go next queue
+		bool try_safe_push(void* const task); //if false go next queue
 
 		bool safe_pop(void **task);
+
+		bool try_safe_pop(void **task); //if false go next queue
 
 		void safe_resize(size_t new_size);
 

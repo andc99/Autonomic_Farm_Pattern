@@ -23,9 +23,10 @@ bool Circular_Buffer::safe_push(void* const task){
 	return true;
 }
 
-/*
+
 bool Circular_Buffer::try_safe_push(void* const task){
 	std::unique_lock<std::mutex> lock(*d_mutex, std::try_to_lock);
+	this->update_mean_push_rate();
 	if(lock.owns_lock()){
 		this->circular_buffer[p_write] = task;
 		this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
@@ -34,7 +35,7 @@ bool Circular_Buffer::try_safe_push(void* const task){
 	}
 	return false;
 }
-*/
+
 
 bool Circular_Buffer::safe_pop(void** task){
 	std::unique_lock<std::mutex> lock(*d_mutex);
@@ -46,6 +47,20 @@ bool Circular_Buffer::safe_pop(void** task){
 	this->p_condition->notify_one();
 	return true;
 }
+
+bool Circular_Buffer::try_safe_pop(void **task){
+	std::unique_lock<std::mutex> lock(*d_mutex, std::try_to_lock);
+	this->update_mean_push_rate();
+	if(lock.owns_lock()){
+		*task = this->circular_buffer[this->p_read];
+		this->circular_buffer[this->p_read] = NULL;
+		this->p_read = (this->p_read == this->size - 1) ? 0 : this->p_read + 1;
+		this->p_condition->notify_one();
+		return true;
+	}
+	return false;
+}
+
 
 
 void Circular_Buffer::safe_resize(size_t new_size){
