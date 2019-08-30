@@ -10,6 +10,7 @@
 
 
 //OGGI
+//le ho messe bounded per controllare il bottleneck
 //capire se ProcessingElement farli tornare Worker
 //-voglio stare il più vicino al tsgoal perché se act_ts > allora devo aumentare i worker. Se act_ts < ts_goal allora singnifica che sto andando più veloce è magari sto sprecando risurse
 //-potremmo non considerare il bottleneck per aumentare ma nel caso avessimo uno stream non definito, un bottleneck potrebbe andare a restituire un errore nel momento in cui il numro degli elementi in coda supera il bound, quindi il check del bottleneck di per sè ovvia a questo problema ed indirettamente a quello del degree per il Ts
@@ -104,7 +105,13 @@ int isPrime(int x){
 long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
 	Autonomic_Farm afs(ts_goal, n_threads, n_max_threads, fun_body, buffer_len, collection);
-	afs.run_and_wait();
+//	afs.run_and_wait();
+	afs.run();
+	size_t a;
+	while((a = afs.pop_outputs()) != -1){
+		//std::cout << a << std::endl;
+	}
+	afs.join();
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }

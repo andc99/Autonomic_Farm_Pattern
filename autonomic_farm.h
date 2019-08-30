@@ -82,18 +82,27 @@ class ProcessingElement{
 
 class Emitter : public ProcessingElement{
 	private:
-		std::vector<Buffer*>* win_bfs; //input queues to workers
-		Buffer* emitter_buffer; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
+		const unsigned int n_buffers;
+		std::function<void(void*)> next_push;
+		BUFFER* emitter_buffer; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
 		std::vector<ssize_t>* collection;
+		
+		std::function<void(void*)> rotate_push(std::vector<BUFFER*>* buffers){
+			size_t id_queue = 0;
+			return [id_queue, buffers](void* task) mutable {
+				((*buffers)[id_queue]->BUFFER::safe_push)(task);
+				(id_queue < buffers->size()-1) ? id_queue++ : id_queue = 0;	
+			};
+		}
 
 	public:
-		Emitter(std::vector<Buffer*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection);
+		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void body();
 
 		void run();
 
-		Buffer* get_in_buffer();
+		BUFFER* get_in_buffer();	
 
 };
 
@@ -107,8 +116,8 @@ class Emitter : public ProcessingElement{
 class Worker : public ProcessingElement{
 	private:
 		std::function<ssize_t(ssize_t)> fun_body;
-		Buffer* win_bf;
-		Buffer* wout_bf;
+		BUFFER* win_bf;
+		BUFFER* wout_bf;
 
 	public: 
 
@@ -118,9 +127,9 @@ class Worker : public ProcessingElement{
 
 		void run();
 
-		Buffer* get_in_buffer();
+		BUFFER* get_in_buffer();
 
-		Buffer* get_out_buffer();
+		BUFFER* get_out_buffer();
 };
 
 
@@ -132,18 +141,26 @@ class Worker : public ProcessingElement{
 
 class Collector: public ProcessingElement{
 	private:
-		std::vector<Buffer*>* wout_bfs;
-		Buffer* collector_buffer;
-		std::function<Buffer*()> next_buffer;
+		const unsigned int n_buffers;
+		std::function<void(void**)> next_pop;
+		BUFFER* collector_buffer;
+
+		std::function<void(void**)> rotate_pop(std::vector<BUFFER*>* buffers){
+			size_t id_queue{0};
+			return [id_queue, buffers](void** task) mutable {
+				((*buffers)[id_queue]->BUFFER::safe_pop)(task);
+				(id_queue < buffers->size()-1) ? id_queue++ : id_queue = 0;	
+			};
+		}
 
 	public:
-		Collector(std::vector<Buffer*>* wout_bfs, size_t buffer_len);
+		Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
 
 		void body();
 
 		void run();
 
-		Buffer* get_out_buffer();
+		BUFFER* get_out_buffer();
 };
 
 
@@ -235,17 +252,19 @@ class Autonomic_Farm{
 		std::vector<Worker*>* workers;
 		Collector* collector;
 
-		Worker* add_worker(std::vector<Buffer*>* win_bfs, std::vector<Buffer*>* wout_bfs, size_t buffer_len);
+		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
 
 
 	public:
 
 		Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
+		void run();
+
+		void join(); 
+
 		void run_and_wait();
 
-		
-		//void push(I task); <-- dipende
-		//O pop();
+		size_t pop_outputs();
 };
 

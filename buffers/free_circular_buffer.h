@@ -13,8 +13,6 @@ class Free_Circular_Buffer : public Free_Buffer{
 
 		bool safe_push(void* const task);
 
-		bool try_safe_push(void* const task); //if false go next queue
-
 		bool safe_pop(void **task);
 
 		void safe_resize(size_t new_size);

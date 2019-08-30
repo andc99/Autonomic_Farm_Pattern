@@ -18,7 +18,7 @@ bool Free_Circular_Buffer::safe_push(void* const task){
 		this->update_mean_push_rate();
 		std::atomic_thread_fence(std::memory_order_release);
 		this->free_circular_buffer[p_write] = task;
-		this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
+		(this->p_write < this->size - 1) ? this->p_write++ : this->p_write = 0;
 		return true;
 	}
 	return false;

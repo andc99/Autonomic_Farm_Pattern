@@ -18,7 +18,7 @@ bool Circular_Buffer::safe_push(void* const task){
 	this->update_mean_push_rate();
 	this->p_condition->wait(lock, [=]{return this->circular_buffer[this->p_write] == NULL;});
 	this->circular_buffer[p_write] = task;
-	this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
+	(this->p_write < this->size - 1) ? this->p_write++ : this->p_write = 0;
 	this->c_condition->notify_one();
 	return true;
 }
@@ -29,7 +29,7 @@ bool Circular_Buffer::try_safe_push(void* const task){
 	this->update_mean_push_rate();
 	if(lock.owns_lock()){
 		this->circular_buffer[p_write] = task;
-		this->p_write = (this->p_write == this->size - 1) ? 0 : this->p_write + 1;
+		(this->p_write < this->size - 1) ? this->p_write++ : this->p_write = 0;
 		this->c_condition->notify_one();
 		return true;
 	}
@@ -43,7 +43,7 @@ bool Circular_Buffer::safe_pop(void** task){
 	this->c_condition->wait(lock, [=]{return this->circular_buffer[this->p_read] != NULL;});
 	*task = this->circular_buffer[this->p_read];
 	this->circular_buffer[this->p_read] = NULL;
-	this->p_read = (this->p_read == this->size - 1) ? 0 : this->p_read + 1;
+	(this->p_read < this->size - 1) ? this->p_read++ : this->p_read = 0;
 	this->p_condition->notify_one();
 	return true;
 }
@@ -54,7 +54,7 @@ bool Circular_Buffer::try_safe_pop(void **task){
 	if(lock.owns_lock()){
 		*task = this->circular_buffer[this->p_read];
 		this->circular_buffer[this->p_read] = NULL;
-		this->p_read = (this->p_read == this->size - 1) ? 0 : this->p_read + 1;
+		(this->p_read < this->size - 1) ? this->p_read++ : this->p_read = 0;
 		this->p_condition->notify_one();
 		return true;
 	}
