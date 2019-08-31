@@ -35,13 +35,10 @@ class Collector;
 
 class ProcessingElement{
 	protected:
-		size_t thread_id;
-		size_t context_id = 0;
 		std::thread* thread;
 		std::mutex *context_id_lock, *stats_lock;
-		long processed_elements = 0;
-		long mean_service_time = 0;
-		long variance_service_time = 0;
+		size_t thread_id, context_id = 0;
+		long processed_elements = 0, mean_service_time = 0, variance_service_time = 0;
 
 		virtual void body() = 0;
 		virtual void run() = 0;
@@ -66,7 +63,7 @@ class ProcessingElement{
 
 		void set_context(size_t context_id);
 
-		ssize_t move_to_context(size_t id_context);
+		int move_to_context(size_t id_context);
 
 		long get_mean_service_time();
 
@@ -82,10 +79,10 @@ class ProcessingElement{
 
 class Emitter : public ProcessingElement{
 	private:
-		const unsigned int n_buffers;
+		const size_t n_buffers;
 		std::function<void(void*)> next_push;
-		BUFFER* emitter_buffer; //potrebbe non essere necessario, dovrebbero esserfe concatenabili (?)
 		std::vector<ssize_t>* collection;
+		BUFFER* emitter_buffer; 
 		
 		std::function<void(void*)> rotate_push(std::vector<BUFFER*>* buffers){
 			size_t id_queue = 0;
@@ -141,7 +138,7 @@ class Worker : public ProcessingElement{
 
 class Collector: public ProcessingElement{
 	private:
-		const unsigned int n_buffers;
+		const size_t n_buffers;
 		std::function<void(void**)> next_pop;
 		BUFFER* collector_buffer;
 
@@ -171,15 +168,15 @@ class Collector: public ProcessingElement{
 /////////////////////////////////////////////////////////////////////////
 class Context{
 	private:
-		const unsigned int id_context;
+		const size_t context_id;
 		std::deque<ProcessingElement*> trace;	
 	
 	public:
-		Context(unsigned id_context);
+		Context(size_t context_id);
 
-		unsigned int get_id_context();
+		size_t get_context_id();
 
-		unsigned int get_n_threads();
+		size_t get_n_threads();
 
 		std::deque<ProcessingElement*> get_trace();
 
@@ -199,20 +196,19 @@ class Context{
 
 class Manager : public ProcessingElement{
 	private:
-		unsigned int nw;
+		size_t nw;
+		const size_t max_nw;
 		const long ts_goal;
-		const unsigned int max_nw;
 		std::atomic<bool>* stop;
-		std::deque<Context*> active_contexts = std::deque<Context*>();
-		std::deque<Context*> idle = std::deque<Context*>();
 		Emitter* emitter;
 		Collector* collector;
 		std::deque<ProcessingElement*> pes_queue;
+		std::deque<Context*> active_contexts = std::deque<Context*>();
+		std::deque<Context*> idle = std::deque<Context*>();
+	
+		void wake_workers(size_t n);
 
-		
-		void wake_workers(unsigned int n);
-
-		void idle_workers(unsigned int n);
+		void idle_workers(size_t n);
 		
 		long get_service_time_farm();
 
@@ -220,14 +216,14 @@ class Manager : public ProcessingElement{
 		
 		void redistribute();
 
-		void resize(Context* context, unsigned int size);
+		void resize(Context* context, size_t size);
 
 	public:
 		Manager(long ts_goal, std::atomic<bool>* stop,
 				Emitter* emitter,
 				Collector* collector,
 				std::vector<ProcessingElement*>* workers,
-				unsigned int nw, unsigned int max_nw, unsigned int n_contexts);
+				size_t nw, size_t max_nw, size_t n_contexts);
 
 		void body();
 
@@ -257,7 +253,7 @@ class Autonomic_Farm{
 
 	public:
 
-		Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
+		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void run();
 

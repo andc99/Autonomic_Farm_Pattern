@@ -15,7 +15,7 @@ ProcessingElement::ProcessingElement(){
 	this->stats_lock = new std::mutex();
 }
 
-ProcessingElement::~ProcessingElement(){ //bypassabile per via dela join
+ProcessingElement::~ProcessingElement(){ 
 	delete thread;
 	delete this->context_id_lock;
 	delete this->stats_lock;
@@ -44,14 +44,15 @@ void ProcessingElement::set_context(size_t context_id){
 	return;
 }
 
-ssize_t ProcessingElement::move_to_context(size_t id_context){
+int ProcessingElement::move_to_context(size_t id_context){
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
-	CPU_SET(static_cast<int>(id_context)%static_cast<int>(std::thread::hardware_concurrency()), &cpuset); //module %
-	ssize_t error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
+	CPU_SET(static_cast<int>(id_context)%static_cast<int>(std::thread::hardware_concurrency()), &cpuset); 
+	int error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 	if (error != 0)
 		std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
-	this->set_context(id_context); //se errore non assegnare. Cambiare nome variabile
+	else
+		this->set_context(id_context); 
 	return error;
 }
 
@@ -226,13 +227,13 @@ BUFFER* Collector::get_out_buffer(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Context::Context(unsigned id_context) : id_context(id_context){};
+Context::Context(size_t context_id) : context_id(context_id){};
 
-unsigned int Context::get_id_context(){
-	return this->id_context;
+size_t Context::get_context_id(){
+	return this->context_id;
 }
 
-unsigned int Context::get_n_threads(){
+size_t Context::get_n_threads(){
 	return this->trace.size();
 }
 
@@ -242,7 +243,7 @@ std::deque<ProcessingElement*> Context::get_trace(){
 
 void Context::move_in(ProcessingElement* pe){
 	this->trace.push_back(pe);
-	pe->set_context(this->id_context);
+	pe->set_context(this->get_context_id());
 	return;
 }
 
@@ -259,8 +260,7 @@ ProcessingElement* Context::move_out(){
 /////////////////////////////////////////////////////////////////////////
 
 
-//se nw è maggiore del numero dei contesti? --> gestire
-void Manager::wake_workers(unsigned int n){
+void Manager::wake_workers(size_t n){
 	n = (n < this->max_nw-this->nw) ? n : max_nw-this->nw;
 	n = (n < this->idle.size()) ? n : this->idle.size();
 	ProcessingElement* pe = NULL; 
@@ -282,7 +282,7 @@ void Manager::wake_workers(unsigned int n){
 
 //rimuovere del tutto il contesto e rimettero su idle se vuoto
 //se non ci sono abbastanza worker da risvegliare? li prendo dal contesto successivo
-void Manager::idle_workers(unsigned int n){ // qui non dovrei aver bisogno di check sulla n
+void Manager::idle_workers(size_t n){ // qui non dovrei aver bisogno di check sulla n
 	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio uno sveglio
 	ProcessingElement* pe = NULL;
 	Context *act_context, *idle_context;
@@ -323,7 +323,7 @@ long Manager::get_service_time_farm(){
 //voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
 Manager::Manager(long ts_goal, std::atomic<bool>* stop, Emitter* emitter, Collector* collector,
 		std::vector<ProcessingElement*>* workers,
-		unsigned int nw, unsigned int max_nw, unsigned int n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
+		size_t nw, size_t max_nw, size_t n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
 	this->emitter = emitter;
 	this->collector = collector;
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
@@ -353,8 +353,8 @@ void Manager::transfer_threads_to_core(Context* from, Context* to){
 }
 
 void Manager::redistribute(){
-	unsigned int r = this->max_nw / this->nw;
-	unsigned int m = this->max_nw % this->nw;
+	size_t r = this->max_nw / this->nw;
+	size_t m = this->max_nw % this->nw;
 	for(auto context : this->active_contexts)
 		this->resize(context, r);
 	ProcessingElement* pe = NULL;
@@ -377,7 +377,7 @@ void Manager::redistribute(){
 	return;
 }
 
-void Manager::resize(Context* context, unsigned int size){
+void Manager::resize(Context* context, size_t size){
 	while(context->get_n_threads() > size){
 		ProcessingElement* pe = context->move_out();
 		this->pes_queue.push_front(pe);
@@ -392,7 +392,7 @@ void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
 	while(!(*this->stop)){
-		int rest =  rand() % 1200 + 200;
+		size_t rest =  rand() % 1200 + 200;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
 				//for(auto const& [key,val] : this->threads_trace){
@@ -406,10 +406,10 @@ void Manager::body(){
 		std::cout << "\n***************" << std::endl;
 		std::cout << " ACTIVE " << std::endl;
 		for(auto i = 0; i < this->active_contexts.size(); i++)
-			std::cout << this->active_contexts[i]->get_id_context() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
+			std::cout << this->active_contexts[i]->get_context_id() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
 		std::cout << " IDLE " << std::endl;
 		for(auto i = 0; i < this->idle.size(); i++)
-			std::cout << this->idle[i]->get_id_context() << " - " << this->idle[i]->get_n_threads() << std::endl;
+			std::cout << this->idle[i]->get_context_id() << " - " << this->idle[i]->get_n_threads() << std::endl;
 		std::cout << " -------- " << std::endl;
 
 		for(auto const& context : active_contexts){
@@ -421,11 +421,12 @@ void Manager::body(){
 		long act_ts = this->get_service_time_farm();
 		std::cout << " sss " << act_ts << std::endl;
 		if( act_ts > this->ts_goal){	
-			unsigned int n = act_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
+			size_t n = act_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
+			if(n < 0){ std::cout << "MALE " << std::endl; return;}
 			std::cout << " increased " << n << std::endl;
 			this->wake_workers(n);
 		}else if(act_ts < this->ts_goal*95/100){
-			unsigned int n = this->ts_goal*95/100/act_ts; //devono esserci totali n! oppure devono essere aggiunti n?
+			size_t n = this->ts_goal*95/100/act_ts; //devono esserci totali n! oppure devono essere aggiunti n?
 			this->idle_workers(n);
 		}else{
 			std::cout << "stable" << std::endl;
@@ -460,7 +461,7 @@ Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BU
 	return worker;
 }
 
-Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
+Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
 	if(nw > max_nw){
 		std::cout << "Error nw > max_nw" << std::endl;
 		return;
@@ -469,7 +470,7 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, unsigned int nw, unsigned int max_n
 		std::cout << "ts_goal is 0" << std::endl;
 		return;
 	}
-	unsigned int n_contexts = std::thread::hardware_concurrency();
+	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 
 	this->max_nw = (max_nw < n_contexts) ? max_nw : n_contexts;
 	std::cout << nw << std::endl;

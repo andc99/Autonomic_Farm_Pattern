@@ -10,6 +10,7 @@
 
 
 //OGGI
+//mettere che se raddoppia i context e non c'è un grande vantaggio, allora significa che non era necessario.
 //le ho messe bounded per controllare il bottleneck
 //capire se ProcessingElement farli tornare Worker
 //-voglio stare il più vicino al tsgoal perché se act_ts > allora devo aumentare i worker. Se act_ts < ts_goal allora singnifica che sto andando più veloce è magari sto sprecando risurse
