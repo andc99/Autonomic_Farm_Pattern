@@ -237,20 +237,20 @@ size_t Context::get_n_threads(){
 	return this->trace.size();
 }
 
-std::deque<ProcessingElement*> Context::get_trace(){
-	return this->trace;
+std::deque<Worker*>* Context::get_trace(){
+	return &this->trace;
 }
 
-void Context::move_in(ProcessingElement* pe){
-	this->trace.push_back(pe);
-	pe->set_context(this->get_context_id());
+void Context::move_in(Worker* w){
+	this->trace.push_back(w);
+	w->set_context(this->get_context_id());
 	return;
 }
 
-ProcessingElement* Context::move_out(){
-	ProcessingElement* pe = this->trace.front(); 
+Worker* Context::move_out(){
+	Worker* w = this->trace.front(); 
 	this->trace.pop_front();
-	return pe;
+	return w;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -261,18 +261,18 @@ ProcessingElement* Context::move_out(){
 
 
 void Manager::wake_workers(size_t n){
-	n = (n < this->max_nw-this->nw) ? n : max_nw-this->nw;
-	n = (n < this->idle.size()) ? n : this->idle.size();
-	ProcessingElement* pe = NULL; 
-	Context *act_context, *idle_context;
+	n = (n <= this->max_nw-this->nw) ? n : this->max_nw-this->nw;
+	n = (n <= this->idle.size()) ? n : this->idle.size();
+	Worker* w = NULL; 
+	Context *act_context, *to_wake;
 	for(auto i = 0; i < n; i++){
-		idle_context = this->idle.front();
+		to_wake = this->idle.front();
 		this->idle.pop_front();
 		act_context = this->active_contexts.front();
 		this->active_contexts.pop_front();
-		pe = act_context->move_out();
-		idle_context->move_in(pe);
-		this->active_contexts.push_front(idle_context);	
+		w = act_context->move_out();
+		to_wake->move_in(w);
+		this->active_contexts.push_front(to_wake);	
 		this->active_contexts.push_back(act_context);
 		this->nw++;
 	}	
@@ -280,24 +280,22 @@ void Manager::wake_workers(size_t n){
 	return;
 }
 
-//rimuovere del tutto il contesto e rimettero su idle se vuoto
-//se non ci sono abbastanza worker da risvegliare? li prendo dal contesto successivo
-void Manager::idle_workers(size_t n){ // qui non dovrei aver bisogno di check sulla n
-	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio uno sveglio
-	ProcessingElement* pe = NULL;
-	Context *act_context, *idle_context;
+void Manager::idle_workers(size_t n){ 
+	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio almen un sveglio
+	Worker* w = NULL;
+	Context *act_context, *to_idle_context;
 	for(auto i = 0; i < n; i++){
-		idle_context = this->active_contexts.back();
+		to_idle_context = this->active_contexts.back();
 		this->active_contexts.pop_back();
-		while(idle_context->get_n_threads() > 0){ //più pesanti sono sul front //da vedere altrimenti c'è da mettere che parte dal fondo
-			pe = idle_context->move_out();
+		while(to_idle_context->get_n_threads() > 0){ 
+			w = to_idle_context->move_out();
 			act_context = this->active_contexts.front();
-			act_context->move_in(pe);
+			act_context->move_in(w);
 			this->active_contexts.pop_front();
-			this->active_contexts.push_back(act_context); //per far ruotare su chi li distribuisco
+			this->active_contexts.push_back(act_context); 
 			
 		}
-		this->idle.push_back(idle_context);	
+		this->idle.push_back(to_idle_context);	
 		this->nw--;
 	}
 	this->redistribute();
@@ -308,22 +306,25 @@ void Manager::idle_workers(size_t n){ // qui non dovrei aver bisogno di check su
 long Manager::get_service_time_farm(){
 	long mean_service_time_workers = 0;
 	for(auto context : this->active_contexts) //a sto punto ce li ho divisi per contesto ehh ottimizzazioni?
-		for(auto worker : context->get_trace())
+		for(auto worker : *(context->get_trace()))
 			mean_service_time_workers+=worker->get_mean_service_time();
 	mean_service_time_workers/=this->max_nw;
 	return std::max({this->emitter->get_mean_service_time(),
 			this->collector->get_mean_service_time(),
-			mean_service_time_workers/static_cast<long>(this->nw)});//questo è nw perchè sono quelli effittivi
-			//castato max_nw a long... fare check sui tipi eh
+			mean_service_time_workers/static_cast<long>(this->nw)});
 }
 
 
 
 //il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
-//voglio ncontexts e non max_nw, quelli sono già stati fissati, perchè altrimenti taglierei fuori dei contesti sui quali potrei spostarmi nel caso di rallentamenti
-Manager::Manager(long ts_goal, std::atomic<bool>* stop, Emitter* emitter, Collector* collector,
-		std::vector<ProcessingElement*>* workers,
-		size_t nw, size_t max_nw, size_t n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
+Manager::Manager(long ts_goal,
+		std::atomic<bool>* stop,
+		Emitter* emitter,
+		Collector* collector,
+		std::vector<Worker*>* workers,
+		size_t nw,
+		size_t max_nw,
+		size_t n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
 	this->emitter = emitter;
 	this->collector = collector;
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
@@ -344,10 +345,10 @@ Manager::Manager(long ts_goal, std::atomic<bool>* stop, Emitter* emitter, Collec
 
 //devo poi aggiornare gli active e gli idle!
 void Manager::transfer_threads_to_core(Context* from, Context* to){
-	ProcessingElement* pe = NULL;
-	while(!from->get_trace().empty()){
-		pe = from->move_out();
-		to->move_in(pe);
+	Worker* w = NULL;
+	while(!from->get_trace()->empty()){
+		w = from->move_out();
+		to->move_in(w);
 	}
 	return;
 }
@@ -357,19 +358,19 @@ void Manager::redistribute(){
 	size_t m = this->max_nw % this->nw;
 	for(auto context : this->active_contexts)
 		this->resize(context, r);
-	ProcessingElement* pe = NULL;
+	Worker* w = NULL;
 	for(auto context : this->active_contexts){
 		while(context->get_n_threads() < r){
-			pe = this->pes_queue.front();
-			this->pes_queue.pop_front();
-			context->move_in(pe);
+			w = this->ws_queue.front();
+			this->ws_queue.pop_front();
+			context->move_in(w);
 		}
 	}
 	Context* context;
-	while(!this->pes_queue.empty()){
-		pe = this->pes_queue.front();
-		this->pes_queue.pop_front();
-		this->active_contexts.front()->move_in(pe);
+	while(!this->ws_queue.empty()){
+		w = this->ws_queue.front();
+		this->ws_queue.pop_front();
+		this->active_contexts.front()->move_in(w);
 		context = this->active_contexts.front();
 		this->active_contexts.pop_front();
 		this->active_contexts.push_back(context);
@@ -379,15 +380,13 @@ void Manager::redistribute(){
 
 void Manager::resize(Context* context, size_t size){
 	while(context->get_n_threads() > size){
-		ProcessingElement* pe = context->move_out();
-		this->pes_queue.push_front(pe);
+		Worker* w = context->move_out();
+		this->ws_queue.push_front(w);
 	}
 	return;	
 }
 
 
-//c'è un caso dove smette di scalare: quello in cui in testa ha un elemento da 1 solo thread dentro:w
-//
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
@@ -402,7 +401,6 @@ void Manager::body(){
 		/*		if(pe->get_in_queue()->is_bottleneck())
 						this->increase_degree();
 		}*/
-		//deve anche decrementare
 		std::cout << "\n***************" << std::endl;
 		std::cout << " ACTIVE " << std::endl;
 		for(auto i = 0; i < this->active_contexts.size(); i++)
@@ -413,9 +411,9 @@ void Manager::body(){
 		std::cout << " -------- " << std::endl;
 
 		for(auto const& context : active_contexts){
-			std::deque<ProcessingElement*> trace = context->get_trace();
-			for(auto const& pe : trace){
-				std::cout << "Worker " << pe->get_id() << ": " << pe->get_mean_service_time() << " - " << pe->get_variance_service_time() << std::endl;
+			std::deque<Worker*>* trace = context->get_trace();
+			for(auto const& w : *trace){
+				std::cout << "Worker " << w->get_id() << ": " << w->get_mean_service_time() << " - " << w->get_variance_service_time() << std::endl;
 			}
 		}
 		long act_ts = this->get_service_time_farm();
@@ -450,7 +448,6 @@ void Manager::run(){
 //	Autonomic Farm	
 //
 /////////////////////////////////////////////////////////////////////////
-//passare come parametro questoooo
 
 
 Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len){ 
@@ -488,7 +485,7 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 
 	this->manager = new Manager(this->ts_goal,
 			this->stop, this->emitter,
-			this->collector, (std::vector<ProcessingElement*>*) this->workers,
+			this->collector, this->workers,
 			nw, this->max_nw, n_contexts);
 }
 

@@ -169,7 +169,7 @@ class Collector: public ProcessingElement{
 class Context{
 	private:
 		const size_t context_id;
-		std::deque<ProcessingElement*> trace;	
+		std::deque<Worker*> trace;	
 	
 	public:
 		Context(size_t context_id);
@@ -178,11 +178,11 @@ class Context{
 
 		size_t get_n_threads();
 
-		std::deque<ProcessingElement*> get_trace();
+		std::deque<Worker*>* get_trace();
 
-		void move_in(ProcessingElement* pe);
+		void move_in(Worker* pe);
 
-		ProcessingElement* move_out();
+		Worker* move_out();
 
 };
 
@@ -202,7 +202,7 @@ class Manager : public ProcessingElement{
 		std::atomic<bool>* stop;
 		Emitter* emitter;
 		Collector* collector;
-		std::deque<ProcessingElement*> pes_queue;
+		std::deque<Worker*> ws_queue;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
 		std::deque<Context*> idle = std::deque<Context*>();
 	
@@ -222,7 +222,7 @@ class Manager : public ProcessingElement{
 		Manager(long ts_goal, std::atomic<bool>* stop,
 				Emitter* emitter,
 				Collector* collector,
-				std::vector<ProcessingElement*>* workers,
+				std::vector<Worker*>* workers,
 				size_t nw, size_t max_nw, size_t n_contexts);
 
 		void body();
