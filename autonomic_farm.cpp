@@ -308,7 +308,7 @@ long Manager::get_service_time_farm(){
 	for(auto context : this->active_contexts) //a sto punto ce li ho divisi per contesto ehh ottimizzazioni?
 		for(auto worker : *(context->get_trace()))
 			mean_service_time_workers+=worker->get_mean_service_time();
-	mean_service_time_workers/=this->max_nw;
+	mean_service_time_workers/=static_cast<long>(this->max_nw);
 	return std::max({this->emitter->get_mean_service_time(),
 			this->collector->get_mean_service_time(),
 			mean_service_time_workers/static_cast<long>(this->nw)});
@@ -325,6 +325,7 @@ Manager::Manager(long ts_goal,
 		size_t nw,
 		size_t max_nw,
 		size_t n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
+	std::ostringstream file_name_stream;
 	this->emitter = emitter;
 	this->collector = collector;
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
@@ -340,6 +341,11 @@ Manager::Manager(long ts_goal,
 	}
 	for(auto i = nw; i < max_nw; i++) 
 		this->active_contexts[i%nw]->move_in((*workers)[i]);
+
+	file_name_stream << this->nw << "_" << this->max_nw << "_" << this->ts_goal << "_" << (*workers)[0]->get_in_buffer()->safe_get_size() << ".csv";
+	this->data.open("./data/"+file_name_stream.str());
+	if(this->data.is_open())
+		this->data << this->ts_goal << "\n" << "Degree,Service_Time,Time\n";
 	return;
 }
 
@@ -386,12 +392,34 @@ void Manager::resize(Context* context, size_t size){
 	return;	
 }
 
+void Manager::info(){
+	std::cout << "\n***************" << std::endl;
+	std::cout << " ACTIVE " << std::endl;
+	for(auto i = 0; i < this->active_contexts.size(); i++)
+		std::cout << this->active_contexts[i]->get_context_id() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
+	std::cout << " IDLE " << std::endl;
+	for(auto i = 0; i < this->idle.size(); i++)
+		std::cout << this->idle[i]->get_context_id() << " - " << this->idle[i]->get_n_threads() << std::endl;
+	std::cout << " -------- " << std::endl;
+
+	for(auto const& context : active_contexts){
+		std::deque<Worker*>* trace = context->get_trace();
+		for(auto const& w : *trace){
+			std::cout << "Worker " << w->get_id() << ": " << w->get_mean_service_time() << " - " << w->get_variance_service_time() << std::endl;
+		}
+	}
+
+	return;
+}
 
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
+	size_t time = 0;
 	while(!(*this->stop)){
+		std::cout << " >> " << nw << std::endl;
 		size_t rest =  rand() % 1200 + 200;
+		time+=rest;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
 				//for(auto const& [key,val] : this->threads_trace){
@@ -401,27 +429,14 @@ void Manager::body(){
 		/*		if(pe->get_in_queue()->is_bottleneck())
 						this->increase_degree();
 		}*/
-		std::cout << "\n***************" << std::endl;
-		std::cout << " ACTIVE " << std::endl;
-		for(auto i = 0; i < this->active_contexts.size(); i++)
-			std::cout << this->active_contexts[i]->get_context_id() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
-		std::cout << " IDLE " << std::endl;
-		for(auto i = 0; i < this->idle.size(); i++)
-			std::cout << this->idle[i]->get_context_id() << " - " << this->idle[i]->get_n_threads() << std::endl;
-		std::cout << " -------- " << std::endl;
-
-		for(auto const& context : active_contexts){
-			std::deque<Worker*>* trace = context->get_trace();
-			for(auto const& w : *trace){
-				std::cout << "Worker " << w->get_id() << ": " << w->get_mean_service_time() << " - " << w->get_variance_service_time() << std::endl;
-			}
-		}
+		info();
 		long act_ts = this->get_service_time_farm();
-		std::cout << " sss " << act_ts << std::endl;
+		std::cout << " Service_Time " << act_ts << "\n" << std::endl;
+		if(this->data.is_open())
+			this->data << this->nw << "," << act_ts << "," << time << "\n";
 		if( act_ts > this->ts_goal){	
 			size_t n = act_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
 			if(n < 0){ std::cout << "MALE " << std::endl; return;}
-			std::cout << " increased " << n << std::endl;
 			this->wake_workers(n);
 		}else if(act_ts < this->ts_goal*95/100){
 			size_t n = this->ts_goal*95/100/act_ts; //devono esserci totali n! oppure devono essere aggiunti n?
@@ -432,8 +447,8 @@ void Manager::body(){
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
-		std::cout << " >> " << nw << std::endl;
 	};
+	data.close();
 	return;
 
 }
@@ -470,8 +485,8 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 
 	this->max_nw = (max_nw < n_contexts) ? max_nw : n_contexts;
-	std::cout << nw << std::endl;
-	std::cout << this->max_nw << std::endl;
+	std::cout << "Initial_degree: " << nw << std::endl;
+	std::cout << "Max_degree " << this->max_nw << std::endl;
 	this->stop = new std::atomic<bool>(false);
 	std::vector<BUFFER*>* win_bfs = new std::vector<BUFFER*>();
 	this->workers = new std::vector<Worker*>();

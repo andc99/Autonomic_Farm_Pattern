@@ -4,9 +4,9 @@
 #include <math.h>
 #include <vector>
 #include <queue>
-#include <unordered_map> 
 #include <functional>
-#include <set>
+#include <fstream>
+#include <sstream> 
 
 #ifdef CB
 	#include "./buffers/circular_buffer.h"
@@ -196,6 +196,7 @@ class Context{
 
 class Manager : public ProcessingElement{
 	private:
+		std::ofstream data;
 		size_t nw;
 		const size_t max_nw;
 		const long ts_goal;
@@ -228,6 +229,8 @@ class Manager : public ProcessingElement{
 		void body();
 
 		void run();
+
+		void info();
 
 }; 
 
