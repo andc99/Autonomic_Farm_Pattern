@@ -35,23 +35,22 @@ class Collector;
 //	Sliding Deque Time	
 //
 /////////////////////////////////////////////////////////////////////////
-//la varianza forse non ha più così tanto senso
 class Sliding_Deque{
 	private:
-		size_t max_size = 600; //da mettere come parametro
-		size_t pos = 1, sum = 0;
+		long size, pos = 1, sum = 0, var_sum = 0;
 		std::deque<long> sliding_deque;
 
 	public:
-		Sliding_Deque(); //max size qua
+		Sliding_Deque(long size); 
 
 		void update(long time);
 
 		long get_mean();
 
-		size_t get_pos();
+		long get_standard_deviation();
 
-		long get_value(size_t pos);
+		long get_size();
+
 };
 
 
@@ -67,21 +66,18 @@ class ProcessingElement{
 		std::thread* thread;
 		std::mutex *context_id_lock, *stats_lock;
 		size_t thread_id, context_id = 0;
-		long mean_service_time = 0, variance_service_time = 0;
-		long T_compute = 0, T_communicate = 0;
-		std::chrono::high_resolution_clock::time_point time_1, time_2, time_3, time_4;
-		Sliding_Deque sliding_time;
+		long mean_service_time = 0, sd_service_time = 0;
+		std::chrono::high_resolution_clock::time_point start_time, end_time;
+		Sliding_Deque* sliding_time;
 	
 		virtual void body() = 0;
 		virtual void run() = 0;
 
-		ProcessingElement();
+		ProcessingElement(long sliding_size);
 
 		~ProcessingElement();
 
 		void update_stats(long act_service_time);
-
-		void update_variance_service_time(long mean, long size);
 		
 
 	public:
@@ -97,7 +93,7 @@ class ProcessingElement{
 
 		long get_mean_service_time();
 
-		long get_variance_service_time();
+		long get_sd_service_time();
 
 };
 
@@ -123,7 +119,7 @@ class Emitter : public ProcessingElement{
 		}
 
 	public:
-		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection);
+		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size);
 
 		void body();
 
@@ -148,7 +144,7 @@ class Worker : public ProcessingElement{
 
 	public: 
 
-		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len);
+		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, long sliding_size);
 
 		void body();
 
@@ -181,7 +177,7 @@ class Collector: public ProcessingElement{
 		}
 
 	public:
-		Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
+		Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_leni, long sliding_size);
 
 		void body();
 
@@ -200,7 +196,7 @@ class Context{
 	private:
 		const size_t context_id;
 		std::deque<Worker*>* trace;	
-		long mean_service_time = 0, variance_service_time = 0;
+		long mean_service_time = 0, sd_service_time = 0;
 		//deconstructor delete trace
 	
 	public:
@@ -220,9 +216,9 @@ class Context{
 
 		void set_mean_service_time(long new_mean);
 
-		long get_variance_service_time();
+		long get_sd_service_time();
 
-		void set_variance_service_time(long new_variance);
+		void set_sd_service_time(long new_sd);
 
 };
 
@@ -264,7 +260,7 @@ class Manager : public ProcessingElement{
 				Emitter* emitter,
 				Collector* collector,
 				std::vector<Worker*>* workers,
-				size_t nw, size_t max_nw, size_t n_contexts);
+				size_t nw, size_t max_nw, size_t n_contexts, long sliding_size);
 
 		void body();
 
@@ -291,7 +287,7 @@ class Autonomic_Farm{
 		std::vector<Worker*>* workers;
 		Collector* collector;
 
-		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
+		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_time);
 
 
 	public:

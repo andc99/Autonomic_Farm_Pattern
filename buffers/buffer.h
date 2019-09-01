@@ -7,10 +7,8 @@
 class Buffer{
 	protected:
 		size_t size = 0;
-		long mean_push_rate = 0, mean_pop_rate = 0; 
 		long pushed_elements = 0, popped_elements = 0; 
 		std::mutex* d_mutex;
-		std::chrono::high_resolution_clock::time_point prev_push_time, prev_pop_time;	
 		Buffer(size_t size);
 		~Buffer();
 

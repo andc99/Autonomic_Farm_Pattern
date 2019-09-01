@@ -8,29 +8,34 @@
 //
 /////////////////////////////////////////////////////////////////////////
 
-Sliding_Deque::Sliding_Deque(){}
+Sliding_Deque::Sliding_Deque(long size){
+	this->sliding_deque.assign(size, 1);
+	this->size = size;
+}
 
-void Sliding_Deque::update(long time){
-	this->sum+=time;
-	if(this->pos < this->max_size){
-		this->pos++;
-	}else{
-		this->sum-=this->sliding_deque.front();
-		this->sliding_deque.pop_front();
-	}
-	this->sliding_deque.push_back(time); //comunque lo inserisco
+void Sliding_Deque::update(long new_time){
+	long old_mean = this->get_mean();
+	long old_time = this->sliding_deque.front();
+	this->sum+=new_time;
+	this->sum-=old_time;
+	this->sliding_deque.pop_front();
+	this->sliding_deque.push_back(new_time);
+	this->var_sum += (new_time + old_time - old_mean - this->get_mean()) * (new_time - old_time);
 	return;
 }
 
 
 long Sliding_Deque::get_mean(){
-	return this->sum/static_cast<long>(this->pos);
+	return static_cast<long>(this->sum/this->size);
 }
 
-size_t Sliding_Deque::get_pos(){
-	return this->pos;
+long Sliding_Deque::get_standard_deviation(){
+	return static_cast<long>(sqrt(this->var_sum/this->size));
 }
 
+long Sliding_Deque::get_size(){
+	return this->size;
+}
 /////////////////////////////////////////////////////////////////////////
 //
 //	ProcessingElement	
@@ -38,17 +43,19 @@ size_t Sliding_Deque::get_pos(){
 /////////////////////////////////////////////////////////////////////////
 
 
-ProcessingElement::ProcessingElement(){
+ProcessingElement::ProcessingElement(long sliding_size){
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
 	this->context_id_lock = new std::mutex();
 	this->stats_lock = new std::mutex();
+	this->sliding_time = new Sliding_Deque(sliding_size);
 }
 
 ProcessingElement::~ProcessingElement(){ 
 	delete thread;
 	delete this->context_id_lock;
 	delete this->stats_lock;
+	delete this->sliding_time;
 	return;
 }
 
@@ -91,40 +98,20 @@ long ProcessingElement::get_mean_service_time(){
 	return this->mean_service_time;
 }
 
-long ProcessingElement::get_variance_service_time(){
+long ProcessingElement::get_sd_service_time(){
 	std::lock_guard<std::mutex> lock(*stats_lock);
-	return this->variance_service_time;
+	return this->sd_service_time;
 }
 
 
 void ProcessingElement::update_stats(long act_service_time){
 	std::lock_guard<std::mutex> lock(*stats_lock);
-	size_t pred_mean_service_time = this->mean_service_time;
-	this->sliding_time.update(act_service_time);
-	this->mean_service_time = this->sliding_time.get_mean();
-	this->update_variance_service_time(this->mean_service_time, static_cast<long>(this->sliding_time.get_pos()));
+	this->sliding_time->update(act_service_time);
+	this->mean_service_time = this->sliding_time->get_mean();
+	this->sd_service_time = this->sliding_time->get_standard_deviation();
 	return;
 }
 
-long Sliding_Deque::get_value(size_t pos){
-	if(pos <= this->pos)
-		return this->sliding_deque[pos];
-	else{
-		std::cout << "errore-------------" << std::endl;
-		return -1;
-	}
-}
-
-void ProcessingElement::update_variance_service_time(long mean, long size){
-	long variance = 0;
-	for(auto i = 0; i < size; i++)
-		variance+= (this->sliding_time.get_value(i) - mean) * (this->sliding_time.get_value(i) - mean);
-	variance /= size;
-	this->variance_service_time = sqrt(variance);
-	/*long sn = this->variance_service_time + (act_value - pred_mean)*(act_value - new_mean);
-	this->variance_service_time = sqrt((sn/elem));*/
-	return;
-}
 
 /////////////////////////////////////////////////////////////////////////
 //
@@ -134,7 +121,7 @@ void ProcessingElement::update_variance_service_time(long mean, long size){
 
 
 
-Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection) : n_buffers(win_bfs->size()), ProcessingElement(){
+Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size) : n_buffers(win_bfs->size()), ProcessingElement(sliding_size){
 
 	this->next_push = Emitter::rotate_push(win_bfs);
 	this->emitter_buffer = new BUFFER(buffer_len); 
@@ -144,14 +131,13 @@ Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<s
 void Emitter::body(){
 	long act_service_time = 0;
 	for(auto i = 0; i < (*collection).size(); i++){
+		this->start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &task = (*collection)[i];
-		this->time_1 = std::chrono::high_resolution_clock::now();
 		this->next_push(&task);
-		this->time_2 = std::chrono::high_resolution_clock::now();
 		if (this->get_context() != sched_getcpu())
 			move_to_context(get_context());
+		this->end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
-		this->time_3 = std::chrono::high_resolution_clock::now();
 		this->update_stats(act_service_time);
 	}
 	for(auto i = 0; i < this->n_buffers; i++){
@@ -178,7 +164,7 @@ BUFFER* Emitter::get_in_buffer(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len):ProcessingElement(){
+Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, long sliding_size):ProcessingElement(sliding_size){
 	this->fun_body = fun_body;
 	this->win_bf = new BUFFER(buffer_len); 
 	this->wout_bf = new BUFFER(buffer_len); 
@@ -224,7 +210,7 @@ BUFFER* Worker::get_out_buffer(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len) : n_buffers(wout_bfs->size()), ProcessingElement(){
+Collector::Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size) : n_buffers(wout_bfs->size()), ProcessingElement(sliding_size){
 	this->next_pop = Collector::rotate_pop(wout_bfs);
 	this->collector_buffer = new BUFFER(buffer_len); 
 }
@@ -302,11 +288,11 @@ void Context::set_mean_service_time(long new_mean){
 	 this->mean_service_time = new_mean;
 }
 
-long Context::get_variance_service_time(){
-	return this->variance_service_time;
+long Context::get_sd_service_time(){
+	return this->sd_service_time;
 }
-void Context::set_variance_service_time(long new_variance){
-	 this->variance_service_time = new_variance;
+void Context::set_sd_service_time(long new_sd){
+	 this->sd_service_time = new_sd;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -360,19 +346,19 @@ void Manager::idle_workers(size_t n){
 
 //Refactorare??
 long Manager::get_service_time_farm(){
-	long mean_service_time = 0, mean_service_time_context, mean_variance_service_time_context;
+	long mean_service_time = 0, mean_service_time_context, mean_sd_service_time_context;
 	for(auto context : this->active_contexts){
 		mean_service_time_context = 0;
-		mean_variance_service_time_context = 0;
+		mean_sd_service_time_context = 0;
 		for(auto worker : *(context->get_trace())){
 			mean_service_time_context+=worker->get_mean_service_time();
-			mean_variance_service_time_context+=worker->get_variance_service_time();
+			mean_sd_service_time_context+=worker->get_sd_service_time();
 		}
 		mean_service_time_context/=static_cast<long>(context->get_n_threads());
 		context->set_mean_service_time(mean_service_time_context);
 
-		mean_variance_service_time_context/=static_cast<long>(context->get_n_threads());
-		context->set_variance_service_time(mean_variance_service_time_context);
+		mean_sd_service_time_context/=static_cast<long>(context->get_n_threads());
+		context->set_sd_service_time(mean_sd_service_time_context);
 
 		mean_service_time+=context->get_mean_service_time();
 	}
@@ -392,7 +378,9 @@ Manager::Manager(long ts_goal,
 		std::vector<Worker*>* workers,
 		size_t nw,
 		size_t max_nw,
-		size_t n_contexts) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(){
+		size_t n_contexts,
+		long sliding_size
+		) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(sliding_size){
 	std::ostringstream file_name_stream;
 	this->emitter = emitter;
 	this->collector = collector;
@@ -477,7 +465,7 @@ void Manager::resize(Context* context, size_t size){
 void Manager::info(){
 	std::cout << "\n***************" << std::endl;
 	for(auto context : this->active_contexts){
-		std::cout << "ID: " << context->get_context_id() << " TS: " << context->get_mean_service_time() << " VAR: " << context->get_variance_service_time() << std::endl;
+		std::cout << "ID: " << context->get_context_id() << " TS: " << context->get_mean_service_time() << " VAR: " << context->get_sd_service_time() << std::endl;
 	}
 	/*std::cout << " ACTIVE " << std::endl;
 	for(auto i = 0; i < this->active_contexts.size(); i++)
@@ -499,6 +487,7 @@ void Manager::info(){
 
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
+	std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 	long act_service_time;
 	size_t time = 0;
 	while(!(*this->stop)){
@@ -514,7 +503,7 @@ void Manager::body(){
 		/*		if(pe->get_in_queue()->is_bottleneck())
 						this->increase_degree();
 		}*/
-	//	info();
+		info();
 	//	this->transfer_threads_to_idle_core(this->active_contexts.front());
 	//	info();
 		long act_ts = this->get_service_time_farm();
@@ -552,8 +541,8 @@ void Manager::run(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len){ 
-	Worker* worker = new Worker(this->fun_body, buffer_len);
+Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size){ 
+	Worker* worker = new Worker(this->fun_body, buffer_len, sliding_size);
 	win_bfs->push_back(worker->get_in_buffer());
 	wout_bfs->push_back(worker->get_out_buffer());
 	(*this->workers).push_back(worker);
@@ -565,10 +554,10 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 		std::cout << "Error nw > max_nw" << std::endl;
 		return;
 	}
-	if(ts_goal == 0){
-		std::cout << "ts_goal is 0" << std::endl;
-		return;
-	}
+	if(ts_goal < 1) ts_goal = 1;
+
+	long sliding_size = 10000; //saaaaaaaaaaaaaa
+
 	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 
 	this->max_nw = (max_nw < n_contexts) ? max_nw : n_contexts;
@@ -580,15 +569,15 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	std::vector<BUFFER*>* wout_bfs = new std::vector<BUFFER*>();	
 
 	for(auto i = 0; i < this->max_nw; i++) 
-		this->add_worker(win_bfs, wout_bfs, buffer_len);
+		this->add_worker(win_bfs, wout_bfs, buffer_len, sliding_size);
 
-	this->emitter = new Emitter(win_bfs, buffer_len, collection);
-	this->collector = new Collector(wout_bfs, buffer_len);
+	this->emitter = new Emitter(win_bfs, buffer_len, collection, sliding_size);
+	this->collector = new Collector(wout_bfs, buffer_len, sliding_size);
 
 	this->manager = new Manager(this->ts_goal,
 			this->stop, this->emitter,
 			this->collector, this->workers,
-			nw, this->max_nw, n_contexts);
+			nw, this->max_nw, n_contexts, sliding_size);
 }
 
 void Autonomic_Farm::run(){
