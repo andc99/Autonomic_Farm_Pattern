@@ -144,14 +144,13 @@ Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<s
 void Emitter::body(){
 	long act_service_time = 0;
 	for(auto i = 0; i < (*collection).size(); i++){
+		this->start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &task = (*collection)[i];
-		this->time_1 = std::chrono::high_resolution_clock::now();
 		this->next_push(&task);
-		this->time_2 = std::chrono::high_resolution_clock::now();
 		if (this->get_context() != sched_getcpu())
 			move_to_context(get_context());
+		this->end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
-		this->time_3 = std::chrono::high_resolution_clock::now();
 		this->update_stats(act_service_time);
 	}
 	for(auto i = 0; i < this->n_buffers; i++){
@@ -418,26 +417,40 @@ Manager::Manager(long ts_goal,
 }
 
 //devo poi aggiornare gli active e gli idle!
-void Manager::transfer_threads_to_idle_core(Context*& from){
-	if(this->idle_contexts.size() == 0)
-		return;
-
-	Context *swap, **to;
-	std::deque<Worker*> *from_trace, *to_trace;
-
-	from_trace = from->get_trace();
-	to = &this->idle_contexts.front();
-	to_trace = (*to)->get_trace();
-
-
-	for(Worker* w : *from_trace)
-		w->set_context((*to)->get_context_id());	
-	from_trace->swap(*to_trace);
+void Manager::transfer_threads_to_idle_core(Context* from){
+	std::deque<Worker*> *idle_trace, *swap_trace, *from_trace;
+	Context *to, *swap;
+	std::cout << " iii " << from->get_n_threads() << std::endl;
+	std::cout << " iii " << from->get_context_id() << std::endl;
+	std::cout << " iii " << this->idle_contexts.front()->get_n_threads() << std::endl;
+	std::cout << " iii " << this->idle_contexts.front()->get_context_id() << std::endl;
 	
-	swap = from;
-	from = *to;
-	*to = swap;
+	idle_trace = this->idle_contexts.front()->get_trace();
+	from_trace = from->get_trace();
+	swap_trace = from_trace;
+	from_trace= idle_trace;
+	idle_trace = swap_trace;
 
+	swap = from;
+	from = this->idle_contexts.front();
+	this->idle_contexts.front() = swap;
+
+		
+	std::cout << " iii " << from->get_n_threads() << std::endl;
+	std::cout << " iii " << from->get_context_id() << std::endl;
+	std::cout << " iii " << this->idle_contexts.front()->get_n_threads() << std::endl;
+	std::cout << " iii " << this->idle_contexts.front()->get_context_id() << std::endl;
+
+	//std::swap(from->get_trace(), this->idle_contexts.front()->get_trace());
+	//std::swap(from, this->idle_contexts.front());
+	/*to_activate = this->idle_contexts.front();
+	from_trace = from->get_trace();
+	to_trace = to_activate->get_trace();
+	to_trace = from_trace;
+	from_trace = new std::deque<Worker*>(); //svuoto quella da addormentare
+	swap = from;
+	from = to_activate;
+	to_activate = swap;*/
 	return;
 }
 
@@ -503,7 +516,7 @@ void Manager::body(){
 	size_t time = 0;
 	while(!(*this->stop)){
 		std::cout << " >> " << nw << std::endl;
-		size_t rest = rand() % 1200 + 200;
+		size_t rest =  200;
 		time+=rest;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
@@ -514,9 +527,9 @@ void Manager::body(){
 		/*		if(pe->get_in_queue()->is_bottleneck())
 						this->increase_degree();
 		}*/
-	//	info();
-	//	this->transfer_threads_to_idle_core(this->active_contexts.front());
-	//	info();
+		info();
+		this->transfer_threads_to_idle_core(this->active_contexts.front());
+		info();
 		long act_ts = this->get_service_time_farm();
 		std::cout << " Service_Time " << act_ts << "\n" << std::endl;
 		if(this->data.is_open())

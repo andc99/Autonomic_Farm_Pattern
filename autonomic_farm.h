@@ -7,6 +7,7 @@
 #include <functional>
 #include <fstream>
 #include <sstream> 
+#include <algorithm> 
 
 #ifdef CB
 	#include "./buffers/circular_buffer.h"
@@ -27,6 +28,34 @@ class Core;
 class Emitter;
 class Worker;
 class Collector;
+
+
+/////////////////////////////////////////////////////////////////////////
+//
+//	Sliding Deque Time	
+//
+/////////////////////////////////////////////////////////////////////////
+//la varianza forse non ha più così tanto senso
+class Sliding_Deque{
+	private:
+		size_t max_size = 600; //da mettere come parametro
+		size_t pos = 1, sum = 0;
+		std::deque<long> sliding_deque;
+
+	public:
+		Sliding_Deque(); //max size qua
+
+		void update(long time);
+
+		long get_mean();
+
+		size_t get_pos();
+
+		long get_value(size_t pos);
+};
+
+
+
 /////////////////////////////////////////////////////////////////////////
 //
 //	ProcessingElement	
@@ -38,8 +67,11 @@ class ProcessingElement{
 		std::thread* thread;
 		std::mutex *context_id_lock, *stats_lock;
 		size_t thread_id, context_id = 0;
-		long processed_elements = 0, mean_service_time = 0, variance_service_time = 0;
-
+		long mean_service_time = 0, variance_service_time = 0;
+		long T_compute = 0, T_communicate = 0;
+		std::chrono::high_resolution_clock::time_point time_1, time_2, time_3, time_4;
+		Sliding_Deque sliding_time;
+	
 		virtual void body() = 0;
 		virtual void run() = 0;
 
@@ -49,9 +81,7 @@ class ProcessingElement{
 
 		void update_stats(long act_service_time);
 
-		long update_mean_service_time(long act_service_time);
-
-		long update_variance_service_time(long act_service_time, long pred_mean_service_time);
+		void update_variance_service_time(long mean, long size);
 		
 
 	public:
@@ -169,7 +199,9 @@ class Collector: public ProcessingElement{
 class Context{
 	private:
 		const size_t context_id;
-		std::deque<Worker*> trace;	
+		std::deque<Worker*>* trace;	
+		long mean_service_time = 0, variance_service_time = 0;
+		//deconstructor delete trace
 	
 	public:
 		Context(size_t context_id);
@@ -183,6 +215,14 @@ class Context{
 		void move_in(Worker* pe);
 
 		Worker* move_out();
+
+		long get_mean_service_time();
+
+		void set_mean_service_time(long new_mean);
+
+		long get_variance_service_time();
+
+		void set_variance_service_time(long new_variance);
 
 };
 
@@ -205,7 +245,7 @@ class Manager : public ProcessingElement{
 		Collector* collector;
 		std::deque<Worker*> ws_queue;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
-		std::deque<Context*> idle = std::deque<Context*>();
+		std::deque<Context*> idle_contexts = std::deque<Context*>();
 	
 		void wake_workers(size_t n);
 
@@ -213,7 +253,7 @@ class Manager : public ProcessingElement{
 		
 		long get_service_time_farm();
 
-		void transfer_threads_to_core(Context* from, Context* to); 
+		void transfer_threads_to_idle_core(Context*& from); 
 		
 		void redistribute();
 

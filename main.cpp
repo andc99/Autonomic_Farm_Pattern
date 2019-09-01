@@ -125,7 +125,7 @@ long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::functio
 long sequential(std::vector<ssize_t>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
 	for(size_t i = 0; i < (*collection).size(); i++)
-		(*collection)[i] = sleep((*collection)[i]);
+		(*collection)[i] = isPrime((*collection)[i]);
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }
@@ -143,29 +143,53 @@ int main(int argc, const char** argv){
 	size_t n_max_threads = std::stoul(argv[3]);
 	size_t buffer_len = atoi(argv[4]);
 	long ts_goal = atoi(argv[5]);
-
 	long seq_time, par_time;
 	std::vector<ssize_t> collection_par, collection_seq;
 	std::cout << "---- Preparing Collection ----" << std::endl;
+
+/*		
+	unsigned int a = 4294967291/2;
+	for(size_t i = a; i > 0; i--){
+		if(isPrime(i)){
+			std::cout << i << std::endl;
+			break;
+		}
+	}
+	return 0;
+*/
+	for(auto i = 0; i < n_tasks; i++){
+		collection_seq.push_back(std::numeric_limits<int>::max());
+		collection_par.push_back(std::numeric_limits<int>::max());
+	}
+/*
 	for(size_t i = 0; i < n_tasks/3; i++){
-		size_t t = 40;// rand() % 3000;
+		size_t t = 2147483629;// rand() % 3000;
 		collection_seq.push_back(t);
 		collection_par.push_back(t);
 	}
 	for(size_t i = n_tasks/3; i < n_tasks*2/3; i++){
-		size_t t = 10; //rand() % 3000;
+		size_t t = 53687090; //rand() % 3000;
 		collection_seq.push_back(t);
 		collection_par.push_back(t);
 	}
 	for(size_t i = n_tasks*2/3; i < n_tasks; i++){
-		size_t t = 80; //rand() % 3000;
+		size_t t = 4294967291; //rand() % 3000;
 		collection_seq.push_back(t);
 		collection_par.push_back(t);
 	}
+
+	*/
+/*	
+	size_t val;// = 4294967291, 536870909, 2147483629;
+	for(size_t i = 0; i < n_tasks; i++){
+		collection_seq.push_back(val);
+		collection_par.push_back(val);
+	}
+*/
 	std::cout << collection_seq.size() << std::endl;
 
 	std::cout << "---- Computing ----" << std::endl;
-	par_time = parallel(ts_goal, n_threads, n_max_threads, sleep, buffer_len, &collection_par);
+	par_time = parallel(ts_goal, n_threads, n_max_threads, isPrime, buffer_len, &collection_par);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
 	seq_time = sequential(&collection_seq);
