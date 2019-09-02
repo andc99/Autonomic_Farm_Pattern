@@ -132,6 +132,9 @@ void Worker::body(){
 	void* task = 0;
 	long act_service_time = 0;
 	this->win_bf->safe_pop(&task);
+	std::chrono::high_resolution_clock::time_point time_ts, time_te;
+	time_ts = std::chrono::high_resolution_clock::now();
+	long processed = 0;
 	while( task != EOS){ 
 		this->start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &t = (*((ssize_t*) task));
@@ -141,6 +144,16 @@ void Worker::body(){
 		if (this->get_context() != sched_getcpu())
 			move_to_context(this->get_context());
 		this->end_time = std::chrono::high_resolution_clock::now();
+		time_te = std::chrono::high_resolution_clock::now();
+		auto sec = std::chrono::duration_cast<std::chrono::seconds>(time_te - time_ts).count();
+		processed++;
+
+		if(sec >= 1){
+			std::cout << " --------> " << processed/sec << std::endl;
+			time_ts = std::chrono::high_resolution_clock::now();
+			processed = 0;
+		}
+
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
 		this->update_stats(act_service_time);
 	};
@@ -503,6 +516,7 @@ void Manager::is_application_overlayed(){
 
 //i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
 //per risparmiare energie
+//ho provato a controllare se se un dato core ci sono altre app ma sia attraverso il throughtput sia attraverso il service time, non riesco perchè se posiziono un'app sul medesimo core di dove sta già girando la farm, tutti i contesti decrementano in modo uguale le prestazioni. Inoltre controllando da htop se aggiungo un'app diminuisce il carico su un app e viene incrementato il clock ma nonostante questo l'applicazione dell'autonous sotto controllo rimane appesantita dalla seconda. Come se ...?
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
@@ -513,7 +527,7 @@ void Manager::body(){
 		time+=rest;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
-		info();
+		//info();
 		//is_application_overlayed();
 		this->detect_bottlenecks();
 		long act_farm_ts = this->get_service_time_farm();
