@@ -15,7 +15,6 @@ Free_Circular_Buffer::~Free_Circular_Buffer(){
 
 bool Free_Circular_Buffer::safe_push(void* const task){
 	if(this->free_circular_buffer[this->p_write] == NULL){
-		this->update_mean_push_rate();
 		std::atomic_thread_fence(std::memory_order_release);
 		this->free_circular_buffer[p_write] = task;
 		(this->p_write < this->size - 1) ? this->p_write++ : this->p_write = 0;
@@ -27,7 +26,6 @@ bool Free_Circular_Buffer::safe_push(void* const task){
 
 bool Free_Circular_Buffer::safe_pop(void** task){
 	if(this->free_circular_buffer[this->p_read] != NULL){  
-		this->update_mean_push_rate();
 		*task = this->free_circular_buffer[this->p_read];
 		std::atomic_thread_fence(std::memory_order_acquire);
 		this->free_circular_buffer[this->p_read] = NULL;

@@ -32,31 +32,6 @@ class Collector;
 
 /////////////////////////////////////////////////////////////////////////
 //
-//	Sliding Deque Time	
-//
-/////////////////////////////////////////////////////////////////////////
-class Sliding_Deque{
-	private:
-		long size, pos = 1, sum = 0, var_sum = 0;
-		std::deque<long> sliding_deque;
-
-	public:
-		Sliding_Deque(long size); 
-
-		void update(long time);
-
-		long get_mean();
-
-		long get_standard_deviation();
-
-		long get_size();
-
-};
-
-
-
-/////////////////////////////////////////////////////////////////////////
-//
 //	ProcessingElement	
 //
 /////////////////////////////////////////////////////////////////////////
@@ -66,9 +41,9 @@ class ProcessingElement{
 		std::thread* thread;
 		std::mutex *context_id_lock, *stats_lock;
 		size_t thread_id, context_id = 0;
-		long mean_service_time = 0, sd_service_time = 0;
 		std::chrono::high_resolution_clock::time_point start_time, end_time;
-		Sliding_Deque* sliding_time;
+		long sliding_size = 0, moving_avg = 0;
+		long pos = 0;
 	
 		virtual void body() = 0;
 		virtual void run() = 0;
@@ -91,9 +66,8 @@ class ProcessingElement{
 
 		int move_to_context(size_t id_context);
 
-		long get_mean_service_time();
+		long get_moving_avg_ts();
 
-		long get_sd_service_time();
 
 };
 
@@ -196,7 +170,7 @@ class Context{
 	private:
 		const size_t context_id;
 		std::deque<Worker*>* trace;	
-		long mean_service_time = 0, sd_service_time = 0;
+		long avg_ts = 0, sd_ts = 0;
 		//deconstructor delete trace
 	
 	public:
@@ -212,14 +186,15 @@ class Context{
 
 		Worker* move_out();
 
-		long get_mean_service_time();
+		long get_avg_ts();
 
-		void set_mean_service_time(long new_mean);
+		void set_avg_ts(long new_avg);
 
-		long get_sd_service_time();
+		/*
+		long get_sd_ts();
 
-		void set_sd_service_time(long new_sd);
-
+		void set_sd_ts(long new_sd);
+*/
 };
 
 
@@ -242,7 +217,7 @@ class Manager : public ProcessingElement{
 		std::deque<Worker*> ws_queue;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
 		std::deque<Context*> idle_contexts = std::deque<Context*>();
-		long contexts_mean_service_time = 0;
+		long contexts_avg_ts = 0;
 	
 		void wake_workers(size_t n);
 
@@ -271,11 +246,13 @@ class Manager : public ProcessingElement{
 	
 		void update_contexts_stats();
 		
-		long get_contexts_mean_service_time();
+		long get_contexts_avg_ts();
 
-		void set_contexts_mean_service_time(long new_value);
+		void set_contexts_avg_ts(long new_value);
 
 		void is_application_overlayed();
+
+		void detect_bottlenecks();
 
 }; 
 

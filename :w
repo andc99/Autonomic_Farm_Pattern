@@ -354,7 +354,6 @@ Manager::Manager(long ts_goal,
 	this->collector = collector;
 	this->emitter->set_context(0);
 	this->collector->set_context(0);
-	this->set_context(0);
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
 		this->idle_contexts.push_back(new Context(id_context));
 	//this->wake_worker(collector); // deve andare sopra l'emitter
@@ -456,10 +455,8 @@ void Manager::info(){
 	return;
 }
 
-//questo deve semplicemente essere una piccola ccortezza. Se sono in una buona posizione ma
-//mi rendo conto che la coda si sta sempre più ingrossando, allora evito di riempirla (c'ho anche il bound che è già buono. Quindi magari do un piccolo aumento di worker affinchè postponga il problema. Quindi serve un range erp il quale è stabile ma che non lo faccia diventare troppo veloce. In particolare devo definire dei largini per i quali quando è stabile, se detecta un bottleneck prova ad aumentare. Quindi anche se va più veloce del ts goal ma ritarda un bottleneck, aggiungi
 void Manager::detect_bottlenecks(){
-	long acc = 0;
+	long acc;
 	for(auto context : this->active_contexts){
 		for(auto worker : *context->get_trace()){
 			acc += worker->get_moving_avg_ts();
@@ -468,15 +465,8 @@ void Manager::detect_bottlenecks(){
 	std::cout << " acc  " << acc/static_cast<long>(this->max_nw) << std::endl;
 	std::cout << " emitter  " << this->emitter->get_moving_avg_ts() << std::endl;
 	std::cout << " round  " << this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw) << std::endl;
-	double mean_ts_ws = acc/static_cast<long>(this->max_nw);	
-	double ro = (mean_ts_ws)/(this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw));
-	if(ro>1){ 
-		long nw = mean_ts_ws/this->emitter->get_moving_avg_ts();
-		std::cout << "should add " << nw << std::endl;
-		if(nw > this->max_nw-this->nw)
-			return;
-		this->wake_workers(1);
-	}
+	float ro = (acc/static_cast<long>(this->max_nw))/(this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw));
+	if(ro>0) this->wake_workers(1);
 	std::cout << " ro " << ro << std::endl;
 }
 
@@ -501,8 +491,7 @@ void Manager::is_application_overlayed(){
 	}
 }
 
-//i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
-//per risparmiare energie
+
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
 	long act_service_time;
@@ -516,20 +505,20 @@ void Manager::body(){
 		info();
 		//is_application_overlayed();
 		this->detect_bottlenecks();
-		long act_farm_ts = this->get_service_time_farm();
-		std::cout << " Service_Time " << act_farm_ts << "\n" << std::endl;
-			if( act_farm_ts > this->ts_goal){	
-			size_t n = act_farm_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
+		long act_ts = this->get_service_time_farm();
+		std::cout << " Service_Time " << act_ts << "\n" << std::endl;
+			if( act_ts > this->ts_goal){	
+			size_t n = act_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
 			if(n < 0){ std::cout << "MALE " << std::endl; return;}
 			this->wake_workers(n);
-		}else if(act_farm_ts < this->ts_goal*50/100){
-			size_t n = this->ts_goal*95/100/act_farm_ts; //devono esserci totali n! oppure devono essere aggiunti n?
+		}else if(act_ts < this->ts_goal*95/100){
+			size_t n = this->ts_goal*95/100/act_ts; //devono esserci totali n! oppure devono essere aggiunti n?
 			this->idle_workers(n);
 		}else{
 			std::cout << "stable" << std::endl;
 		}
 		if(this->data.is_open())
-			this->data << this->nw << "," << act_farm_ts << "," << time << "\n";
+			this->data << this->nw << "," << act_ts << "," << time << "\n";
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
@@ -566,7 +555,7 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	}
 	if(ts_goal < 1) ts_goal = 1;
 
-	long sliding_size = 30000; //saaaaaaaaaaaaaa
+	long sliding_size = 100; //saaaaaaaaaaaaaa
 
 	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 

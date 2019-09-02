@@ -12,10 +12,6 @@ class Buffer{
 		Buffer(size_t size);
 		~Buffer();
 
-		void update_mean_push_rate();
-
-		void update_mean_pop_rate();
-
 	public:
 		virtual bool safe_push(void* const task) = 0;
 
@@ -25,7 +21,6 @@ class Buffer{
 
 		virtual size_t safe_get_size() = 0;
 
-		bool is_bottleneck();
 
 };
 
