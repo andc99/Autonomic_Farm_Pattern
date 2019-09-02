@@ -505,10 +505,15 @@ void Manager::is_application_overlayed(){
 	long diff = 0, cs_mean;
 	for(auto context : this->active_contexts){
 		cs_mean = this->get_contexts_mean_service_time();
-		diff = context->get_mean_service_time - cs_mean;
+		diff = context->get_mean_service_time() - cs_mean;
+		std::cout << diff << std::endl;
+		if(diff>0){
+			std::cout << (diff+cs_mean) << std::endl;
+			std::cout << (int) (100*(diff+cs_mean)/cs_mean > 150) << std::endl;
+		}
 		if( diff > 0 && 100*(diff+cs_mean)/cs_mean > 150){
-			this->transfer_threads_to_idle_core(context);
 			std::cout << "switched" << context->get_context_id() << "\n";
+			this->transfer_threads_to_idle_core(context);
 		}
 		this->update_contexts_stats();
 	}
@@ -526,12 +531,10 @@ void Manager::body(){
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
 		info();
-		is_application_overlayed();
+		//is_application_overlayed();
 		long act_ts = this->get_service_time_farm();
 		std::cout << " Service_Time " << act_ts << "\n" << std::endl;
-		if(this->data.is_open())
-			this->data << this->nw << "," << act_ts << "," << time << "\n";
-		if( act_ts > this->ts_goal){	
+			if( act_ts > this->ts_goal){	
 			size_t n = act_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
 			if(n < 0){ std::cout << "MALE " << std::endl; return;}
 			this->wake_workers(n);
@@ -541,6 +544,8 @@ void Manager::body(){
 		}else{
 			std::cout << "stable" << std::endl;
 		}
+		if(this->data.is_open())
+			this->data << this->nw << "," << act_ts << "," << time << "\n";
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);

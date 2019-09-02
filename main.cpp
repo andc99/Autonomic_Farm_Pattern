@@ -164,13 +164,13 @@ int main(int argc, const char** argv){
 	}
 	return 0;
 */
-	/*
+	
 	for(auto i = 0; i < n_tasks; i++){
 		collection_seq.push_back(std::numeric_limits<int>::max());
 		collection_par.push_back(std::numeric_limits<int>::max());
 	}
-	*/
-
+	
+/*
 	for(size_t i = 0; i < n_tasks/3; i++){
 		size_t t = 39;// rand() % 3000;
 		collection_seq.push_back(t);
@@ -187,6 +187,7 @@ int main(int argc, const char** argv){
 		collection_par.push_back(t);
 	}
 
+	*/
 	/*
 	for(size_t i = 0; i < n_tasks/3; i++){
 		size_t t = 2147483629;// rand() % 3000;
