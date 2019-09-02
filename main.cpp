@@ -103,6 +103,13 @@ int isPrime(size_t x){
 	return 1;
 }
 
+int fib(int x){
+	if(x==1 || x==0)
+		return(x);
+	else
+		return fib(x-1) + fib(x-2);
+}
+
 int sleep(size_t x){
     	std::this_thread::sleep_for (std::chrono::milliseconds(x));
 	return 1;
@@ -122,10 +129,10 @@ long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::functio
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }
 
-long sequential(std::vector<ssize_t>* collection){
+long sequential(std::function<ssize_t(ssize_t)> fun_body, std::vector<ssize_t>* collection){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
 	for(size_t i = 0; i < (*collection).size(); i++)
-		(*collection)[i] = isPrime((*collection)[i]);
+		(*collection)[i] = fun_body((*collection)[i]);
 	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 }
@@ -165,6 +172,23 @@ int main(int argc, const char** argv){
 	*/
 
 	for(size_t i = 0; i < n_tasks/3; i++){
+		size_t t = 39;// rand() % 3000;
+		collection_seq.push_back(t);
+		collection_par.push_back(t);
+	}
+	for(size_t i = n_tasks/3; i < n_tasks*2/3; i++){
+		size_t t = 41; //rand() % 3000;
+		collection_seq.push_back(t);
+		collection_par.push_back(t);
+	}
+	for(size_t i = n_tasks*2/3; i < n_tasks; i++){
+		size_t t = 40; //rand() % 3000;
+		collection_seq.push_back(t);
+		collection_par.push_back(t);
+	}
+
+	/*
+	for(size_t i = 0; i < n_tasks/3; i++){
 		size_t t = 2147483629;// rand() % 3000;
 		collection_seq.push_back(t);
 		collection_par.push_back(t);
@@ -180,7 +204,7 @@ int main(int argc, const char** argv){
 		collection_par.push_back(t);
 	}
 
-	
+*/
 /*	
 	size_t val;// = 4294967291, 536870909, 2147483629;
 	for(size_t i = 0; i < n_tasks; i++){
@@ -194,7 +218,7 @@ int main(int argc, const char** argv){
 	par_time = parallel(ts_goal, n_threads, n_max_threads, isPrime, buffer_len, &collection_par);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
-	seq_time = sequential(&collection_seq);
+	seq_time = sequential(isPrime, &collection_seq);
 	std::cout << "Seq_TIME: " << seq_time << std::endl;
 
 	std::cout << "Scalability " << (float) seq_time/par_time << std::endl;

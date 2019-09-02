@@ -345,8 +345,9 @@ void Manager::idle_workers(size_t n){
 }
 
 //Refactorare??
-long Manager::get_service_time_farm(){
-	long mean_service_time = 0, mean_service_time_context, mean_sd_service_time_context;
+
+void Manager::update_contexts_stats(){
+	long sum_means = 0, mean_service_time_context, mean_sd_service_time_context;
 	for(auto context : this->active_contexts){
 		mean_service_time_context = 0;
 		mean_sd_service_time_context = 0;
@@ -360,12 +361,26 @@ long Manager::get_service_time_farm(){
 		mean_sd_service_time_context/=static_cast<long>(context->get_n_threads());
 		context->set_sd_service_time(mean_sd_service_time_context);
 
-		mean_service_time+=context->get_mean_service_time();
+		sum_means+=context->get_mean_service_time();
 	}
-	mean_service_time/=static_cast<long>(this->nw);
+	this->set_contexts_mean_service_time(sum_means);
+
+}
+
+void Manager::set_contexts_mean_service_time(long new_value){
+	this->contexts_mean_service_time = new_value/static_cast<long>(this->nw);
+	return;
+}
+
+
+long Manager::get_contexts_mean_service_time(){
+	return this->contexts_mean_service_time;
+}
+
+long Manager::get_service_time_farm(){
 	return std::max({this->emitter->get_mean_service_time(),
 			this->collector->get_mean_service_time(),
-			mean_service_time/static_cast<long>(this->nw)});
+			this->get_contexts_mean_service_time()});
 }
 
 
@@ -464,30 +479,44 @@ void Manager::resize(Context* context, size_t size){
 
 void Manager::info(){
 	std::cout << "\n***************" << std::endl;
-	for(auto context : this->active_contexts){
-		std::cout << "ID: " << context->get_context_id() << " TS: " << context->get_mean_service_time() << " VAR: " << context->get_sd_service_time() << std::endl;
-	}
-	/*std::cout << " ACTIVE " << std::endl;
+	//for(auto context : this->active_contexts){
+	//	std::cout << "ID: " << context->get_context_id() << " TS: " << context->get_mean_service_time() << " VAR: " << context->get_sd_service_time() << std::endl;
+	//}
+	std::cout << " ACTIVE " << std::endl;
 	for(auto i = 0; i < this->active_contexts.size(); i++)
 		std::cout << this->active_contexts[i]->get_context_id() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
 	std::cout << " IDLE " << std::endl;
-	for(auto i = 0; i < this->idle.size(); i++)
-		std::cout << this->idle[i]->get_context_id() << " - " << this->idle[i]->get_n_threads() << std::endl;
+	for(auto i = 0; i < this->idle_contexts.size(); i++)
+		std::cout << this->idle_contexts[i]->get_context_id() << " - " << this->idle_contexts[i]->get_n_threads() << std::endl;
 	std::cout << " -------- " << std::endl;
 
 	for(auto const& context : active_contexts){
 		std::deque<Worker*>* trace = context->get_trace();
 		for(auto const& w : *trace){
-			std::cout << "Worker " << w->get_id() << ": " << w->get_mean_service_time() << " - " << w->get_variance_service_time() << std::endl;
+			std::cout << "Worker " << w->get_id() << ": " << w->get_mean_service_time() << " - " << w->get_sd_service_time() << std::endl;
 		}
-	}*/
+	}
 
 	return;
 }
 
+//Assumo che i task siano distribuiti a caso perciò se la media di un core si distacca molto allora significa che c'è un'altra app sopra
+void Manager::is_application_overlayed(){
+	long diff = 0, cs_mean;
+	for(auto context : this->active_contexts){
+		cs_mean = this->get_contexts_mean_service_time();
+		diff = context->get_mean_service_time - cs_mean;
+		if( diff > 0 && 100*(diff+cs_mean)/cs_mean > 150){
+			this->transfer_threads_to_idle_core(context);
+			std::cout << "switched" << context->get_context_id() << "\n";
+		}
+		this->update_contexts_stats();
+	}
+}
+
+
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 	long act_service_time;
 	size_t time = 0;
 	while(!(*this->stop)){
@@ -496,16 +525,8 @@ void Manager::body(){
 		time+=rest;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
-				//for(auto const& [key,val] : this->threads_trace){
-		//	for(auto pe : val)
-		//		std::cout << "ID: " << pe->get_id() << " --- " << pe->get_context() << std::endl;
-		//}
-		/*		if(pe->get_in_queue()->is_bottleneck())
-						this->increase_degree();
-		}*/
 		info();
-	//	this->transfer_threads_to_idle_core(this->active_contexts.front());
-	//	info();
+		is_application_overlayed();
 		long act_ts = this->get_service_time_farm();
 		std::cout << " Service_Time " << act_ts << "\n" << std::endl;
 		if(this->data.is_open())
@@ -556,7 +577,7 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	}
 	if(ts_goal < 1) ts_goal = 1;
 
-	long sliding_size = 10000; //saaaaaaaaaaaaaa
+	long sliding_size = 100; //saaaaaaaaaaaaaa
 
 	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 

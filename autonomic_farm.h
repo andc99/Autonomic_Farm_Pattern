@@ -242,6 +242,7 @@ class Manager : public ProcessingElement{
 		std::deque<Worker*> ws_queue;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
 		std::deque<Context*> idle_contexts = std::deque<Context*>();
+		long contexts_mean_service_time = 0;
 	
 		void wake_workers(size_t n);
 
@@ -267,6 +268,14 @@ class Manager : public ProcessingElement{
 		void run();
 
 		void info();
+	
+		void update_contexts_stats();
+		
+		long get_contexts_mean_service_time();
+
+		void set_contexts_mean_service_time(long new_value);
+
+		void is_application_overlayed();
 
 }; 
 
