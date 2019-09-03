@@ -149,7 +149,7 @@ void Worker::body(){
 		processed++;
 
 		if(sec >= 1){
-			std::cout << " --------> " << processed/sec << std::endl;
+			//std::cout << " --------> " << processed/sec << std::endl;
 			time_ts = std::chrono::high_resolution_clock::now();
 			processed = 0;
 		}
@@ -373,6 +373,8 @@ Manager::Manager(long ts_goal,
 	//this->wake_worker(collector); // deve andare sopra l'emitter
 	//this->wake_worker(this); // deve andare sopra l'emitter
 	Context* context;
+	this->ts_upper_bound = this->ts_goal + this->ts_goal*4/10;
+	std::cout << "ts_upper_bound : " << this->ts_upper_bound << std::endl;
 	for(auto i = 0; i < nw; i++){
 		context = this->idle_contexts.front();
 		this->idle_contexts.pop_front();
@@ -385,7 +387,7 @@ Manager::Manager(long ts_goal,
 	file_name_stream << this->nw << "_" << this->max_nw << "_" << this->ts_goal << "_" << (*workers)[0]->get_in_buffer()->safe_get_size() << ".csv";
 	this->data.open("./data/"+file_name_stream.str());
 	if(this->data.is_open())
-		this->data << this->ts_goal << "\n" << "Degree,Service_Time,Time\n";
+		this->data << this->ts_goal << "\n" << this->ts_upper_bound << "\n" << "Degree,Service_Time,Time\n";
 	return;
 }
 
@@ -471,26 +473,28 @@ void Manager::info(){
 
 //questo deve semplicemente essere una piccola ccortezza. Se sono in una buona posizione ma
 //mi rendo conto che la coda si sta sempre più ingrossando, allora evito di riempirla (c'ho anche il bound che è già buono. Quindi magari do un piccolo aumento di worker affinchè postponga il problema. Quindi serve un range erp il quale è stabile ma che non lo faccia diventare troppo veloce. In particolare devo definire dei largini per i quali quando è stabile, se detecta un bottleneck prova ad aumentare. Quindi anche se va più veloce del ts goal ma ritarda un bottleneck, aggiungi
-void Manager::detect_bottlenecks(){
+bool Manager::detect_bottlenecks(){
 	long acc = 0;
 	for(auto context : this->active_contexts){
 		for(auto worker : *context->get_trace()){
 			acc += worker->get_moving_avg_ts();
 		}
 	}
-	std::cout << " acc  " << acc/static_cast<long>(this->max_nw) << std::endl;
-	std::cout << " emitter  " << this->emitter->get_moving_avg_ts() << std::endl;
-	std::cout << " round  " << this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw) << std::endl;
+	//std::cout << " acc  " << acc/static_cast<long>(this->max_nw) << std::endl;
+	//std::cout << " emitter  " << this->emitter->get_moving_avg_ts() << std::endl;
+	//std::cout << " round  " << this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw) << std::endl;
 	double mean_ts_ws = acc/static_cast<long>(this->max_nw);	
 	double ro = (mean_ts_ws)/(this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw));
+	/*
 	if(ro>1){ 
 		long nw = mean_ts_ws/this->emitter->get_moving_avg_ts();
 		std::cout << "should add " << nw << std::endl;
 		if(nw > this->max_nw-this->nw)
 			return;
 		this->wake_workers(1);
-	}
+	}*/
 	std::cout << " ro " << ro << std::endl;
+	return (ro > 0.6) ? true : false;
 }
 
 //Assumo che i task siano distribuiti a caso perciò se la media di un core si distacca molto allora significa che c'è un'altra app sopra
@@ -514,24 +518,59 @@ void Manager::is_application_overlayed(){
 	}
 }
 
+void Manager::control_nw_policy(long prev_time, long time, long prev_farm_ts, long farm_ts){
+	double slope = (double) (farm_ts-prev_farm_ts)/(time-prev_time); //se negativo siamo in discesa
+	std::cout << "slope: " << slope << std::endl;
+	double q = farm_ts - slope*time; // y = mx + q;
+	std::cout << "q: " << q << std::endl;
+	long future_time = time+500;
+	long predicted_farm_ts = slope*future_time + q;
+	std::cout << "predicted_farm_ts: " << predicted_farm_ts << std::endl;
+	if(farm_ts <= this->ts_upper_bound && farm_ts >= this->ts_goal && this->detect_bottlenecks()){
+		size_t nw = farm_ts/this->ts_goal; //Se non ci sono abbastanza nw, wake_workers non li add
+		std::cout << "BBBBBBBB " << nw << std::endl;
+		this->wake_workers(nw);
+		return;
+	}
+	if(farm_ts > this->ts_upper_bound){
+		size_t nw = farm_ts/this->ts_upper_bound;
+		std::cout << "DDDDDDDDDDDd " << nw << std::endl;
+		this->wake_workers(nw);
+	}
+	if(farm_ts < this->ts_goal){
+		std::cout << "CCCCCCCCC " << nw << std::endl;
+		size_t nw = this->ts_goal/farm_ts;
+		this->idle_workers(nw);
+		return;
+	}
+	//la domanda è nw devo aggiungerli/rimuoverli o è a quanto devo settare? Secondo me quanti aggiungerne
+	
+
+
+	std::cout << "stable? " << (farm_ts > this->ts_upper_bound && farm_ts < this->ts_goal) << std::endl;
+	return;
+}
+
 //i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
 //per risparmiare energie
 //ho provato a controllare se se un dato core ci sono altre app ma sia attraverso il throughtput sia attraverso il service time, non riesco perchè se posiziono un'app sul medesimo core di dove sta già girando la farm, tutti i contesti decrementano in modo uguale le prestazioni. Inoltre controllando da htop se aggiungo un'app diminuisce il carico su un app e viene incrementato il clock ma nonostante questo l'applicazione dell'autonous sotto controllo rimane appesantita dalla seconda. Come se ...?
 void Manager::body(){
 	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	long act_service_time;
-	size_t time = 0;
+	long act_service_time, prev_farm_ts = 0, farm_ts = 0;
+	long prev_time = 0, time = 0;
+	prev_farm_ts = this->get_service_time_farm();
 	while(!(*this->stop)){
 		std::cout << " >> " << nw << std::endl;
-		size_t rest = rand() % 1200 + 200;
+		long rest = rand() % 1200 + 200;
 		time+=rest;
 		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 		start_time = std::chrono::high_resolution_clock::now();
 		//info();
 		//is_application_overlayed();
 		this->detect_bottlenecks();
-		long act_farm_ts = this->get_service_time_farm();
-		std::cout << " Service_Time " << act_farm_ts << "\n" << std::endl;
+		farm_ts = this->get_service_time_farm();
+		this->control_nw_policy(prev_time, time, prev_farm_ts, farm_ts);
+				/*std::cout << " Service_Time " << act_farm_ts << "\n" << std::endl;
 			if( act_farm_ts > this->ts_goal){	
 			size_t n = act_farm_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
 			if(n < 0){ std::cout << "MALE " << std::endl; return;}
@@ -541,9 +580,13 @@ void Manager::body(){
 			this->idle_workers(n);
 		}else{
 			std::cout << "stable" << std::endl;
-		}
+		}*/
 		if(this->data.is_open())
-			this->data << this->nw << "," << act_farm_ts << "," << time << "\n";
+			this->data << this->nw << "," << farm_ts << "," << time << "\n";
+
+		prev_farm_ts = farm_ts;
+		prev_time = time;
+
 		end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
 		this->update_stats(act_service_time);
@@ -573,14 +616,12 @@ Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BU
 	return worker;
 }
 
-Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection) : ts_goal(ts_goal), fun_body(fun_body){ 
+Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size) : ts_goal(ts_goal), fun_body(fun_body){ 
 	if(nw > max_nw){
 		std::cout << "Error nw > max_nw" << std::endl;
 		return;
 	}
 	if(ts_goal < 1) ts_goal = 1;
-
-	long sliding_size = 30000; //saaaaaaaaaaaaaa
 
 	size_t n_contexts = std::thread::hardware_concurrency();
 	nw = (nw < n_contexts) ? nw : n_contexts; 

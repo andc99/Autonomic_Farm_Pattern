@@ -115,9 +115,9 @@ int sleep(size_t x){
 	return 1;
 }
 
-long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection){
+long parallel(long ts_goal, size_t n_threads, size_t n_max_threads, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size){
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
-	Autonomic_Farm afs(ts_goal, n_threads, n_max_threads, fun_body, buffer_len, collection);
+	Autonomic_Farm afs(ts_goal, n_threads, n_max_threads, fun_body, buffer_len, collection, sliding_size);
 //	afs.run_and_wait();
 	afs.run();
 	size_t a;
@@ -139,7 +139,7 @@ long sequential(std::function<ssize_t(ssize_t)> fun_body, std::vector<ssize_t>* 
 
 
 int main(int argc, const char** argv){
-	if(argc < 6){
+	if(argc < 7){
 		std::cout << "Missing Arguments.\nExample: " << argv[0] << " n_tasks n_threads buffer_len sticky" << std::endl;
 		return 1;
 	}
@@ -150,6 +150,7 @@ int main(int argc, const char** argv){
 	size_t n_max_threads = std::stoul(argv[3]);
 	size_t buffer_len = atoi(argv[4]);
 	long ts_goal = atoi(argv[5]);
+	long sliding_size = atoi(argv[6]);
 	long seq_time, par_time;
 	std::vector<ssize_t> collection_par, collection_seq;
 	std::cout << "---- Preparing Collection ----" << std::endl;
@@ -164,12 +165,12 @@ int main(int argc, const char** argv){
 	}
 	return 0;
 */
-	
+/*	
 	for(auto i = 0; i < n_tasks; i++){
 		collection_seq.push_back(std::numeric_limits<int>::max());
 		collection_par.push_back(std::numeric_limits<int>::max());
 	}
-	
+*/	
 /*
 	for(size_t i = 0; i < n_tasks/3; i++){
 		size_t t = 39;// rand() % 3000;
@@ -188,7 +189,7 @@ int main(int argc, const char** argv){
 	}
 
 	*/
-	/*
+	
 	for(size_t i = 0; i < n_tasks/3; i++){
 		size_t t = 2147483629;// rand() % 3000;
 		collection_seq.push_back(t);
@@ -205,7 +206,7 @@ int main(int argc, const char** argv){
 		collection_par.push_back(t);
 	}
 
-*/
+
 /*	
 	size_t val;// = 4294967291, 536870909, 2147483629;
 	for(size_t i = 0; i < n_tasks; i++){
@@ -216,7 +217,7 @@ int main(int argc, const char** argv){
 	std::cout << collection_seq.size() << std::endl;
 
 	std::cout << "---- Computing ----" << std::endl;
-	par_time = parallel(ts_goal, n_threads, n_max_threads, isPrime, buffer_len, &collection_par);
+	par_time = parallel(ts_goal, n_threads, n_max_threads, isPrime, buffer_len, &collection_par, sliding_size);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
 	seq_time = sequential(isPrime, &collection_seq);

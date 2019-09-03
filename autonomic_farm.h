@@ -211,6 +211,7 @@ class Manager : public ProcessingElement{
 		size_t nw;
 		const size_t max_nw;
 		const long ts_goal;
+		long ts_upper_bound;
 		std::atomic<bool>* stop;
 		Emitter* emitter;
 		Collector* collector;
@@ -231,6 +232,18 @@ class Manager : public ProcessingElement{
 
 		void resize(Context* context, size_t size);
 
+		void control_nw_policy(long prev_time, long time, long prev_farm_ts, long farm_ts);
+
+		void update_contexts_stats();
+		
+		long get_contexts_avg_ts();
+
+		void set_contexts_avg_ts(long new_value);
+
+		void is_application_overlayed();
+
+		bool detect_bottlenecks();
+
 	public:
 		Manager(long ts_goal, std::atomic<bool>* stop,
 				Emitter* emitter,
@@ -242,17 +255,7 @@ class Manager : public ProcessingElement{
 
 		void run();
 
-		void info();
-	
-		void update_contexts_stats();
-		
-		long get_contexts_avg_ts();
-
-		void set_contexts_avg_ts(long new_value);
-
-		void is_application_overlayed();
-
-		void detect_bottlenecks();
+		void info();	
 
 }; 
 
@@ -273,12 +276,12 @@ class Autonomic_Farm{
 		std::vector<Worker*>* workers;
 		Collector* collector;
 
-		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_time);
+		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size);
 
 
 	public:
 
-		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection);
+		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size);
 
 		void run();
 
