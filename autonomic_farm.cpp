@@ -8,12 +8,11 @@
 /////////////////////////////////////////////////////////////////////////
 
 
-ProcessingElement::ProcessingElement(long sliding_size){
+ProcessingElement::ProcessingElement(){
 	static std::atomic<size_t> id{0};
 	this->thread_id = id++; 
 	this->context_id_lock = new std::mutex();
 	this->stats_lock = new std::mutex();
-	this->sliding_size  = sliding_size;
 }
 
 ProcessingElement::~ProcessingElement(){ 
@@ -48,7 +47,7 @@ void ProcessingElement::set_context(size_t context_id){
 int ProcessingElement::move_to_context(size_t id_context){
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
-	CPU_SET(static_cast<int>(id_context)%static_cast<int>(std::thread::hardware_concurrency()), &cpuset); 
+	CPU_SET(id_context%std::thread::hardware_concurrency(), &cpuset); 
 	int error = pthread_setaffinity_np(this->thread->native_handle(), sizeof(cpu_set_t), &cpuset);
 	if (error != 0)
 		std::cout << "Error calling pthread_setaffinity_np: " << error << "\n";
@@ -57,16 +56,14 @@ int ProcessingElement::move_to_context(size_t id_context){
 	return error;
 }
 
-long ProcessingElement::get_moving_avg_ts(){
+long ProcessingElement::get_ts(){
 	std::lock_guard<std::mutex> lock(*stats_lock);
-	return this->moving_avg;
+	return this->service_time;
 }
 
-void ProcessingElement::update_stats(long act_service_time){
+void ProcessingElement::update_ts(long act_service_time){
 	std::lock_guard<std::mutex> lock(*stats_lock);
-	long old_avg = this->moving_avg;
-	this->moving_avg += (act_service_time - old_avg)/(this->pos+1);
-	if(this->pos < this->sliding_size) this->pos++;
+	this->service_time = act_service_time;
 	return;
 }
 
@@ -79,8 +76,7 @@ void ProcessingElement::update_stats(long act_service_time){
 
 
 
-Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size) : n_buffers(win_bfs->size()), ProcessingElement(sliding_size){
-
+Emitter::Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection) : n_buffers(win_bfs->size()), ProcessingElement(){
 	this->next_push = Emitter::rotate_push(win_bfs);
 	this->emitter_buffer = new BUFFER(buffer_len); 
 	this->collection = collection;
@@ -96,7 +92,7 @@ void Emitter::body(){
 			move_to_context(get_context());
 		this->end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
-		this->update_stats(act_service_time);
+		this->update_ts((act_service_time <= 0) ? 1 : act_service_time);
 	}
 	for(auto i = 0; i < this->n_buffers; i++){
 		this->next_push(EOS);
@@ -122,7 +118,7 @@ BUFFER* Emitter::get_in_buffer(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, long sliding_size):ProcessingElement(sliding_size){
+Worker::Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len):ProcessingElement(){
 	this->fun_body = fun_body;
 	this->win_bf = new BUFFER(buffer_len); 
 	this->wout_bf = new BUFFER(buffer_len); 
@@ -133,8 +129,6 @@ void Worker::body(){
 	long act_service_time = 0;
 	this->win_bf->safe_pop(&task);
 	std::chrono::high_resolution_clock::time_point time_ts, time_te;
-	time_ts = std::chrono::high_resolution_clock::now();
-	long processed = 0;
 	while( task != EOS){ 
 		this->start_time = std::chrono::high_resolution_clock::now();
 		ssize_t &t = (*((ssize_t*) task));
@@ -144,18 +138,8 @@ void Worker::body(){
 		if (this->get_context() != sched_getcpu())
 			move_to_context(this->get_context());
 		this->end_time = std::chrono::high_resolution_clock::now();
-		time_te = std::chrono::high_resolution_clock::now();
-		auto sec = std::chrono::duration_cast<std::chrono::seconds>(time_te - time_ts).count();
-		processed++;
-
-		if(sec >= 1){
-			//std::cout << " --------> " << processed/sec << std::endl;
-			time_ts = std::chrono::high_resolution_clock::now();
-			processed = 0;
-		}
-
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
-		this->update_stats(act_service_time);
+		this->update_ts(act_service_time);
 	};
 	this->wout_bf->safe_push(EOS);
 	return;
@@ -181,7 +165,7 @@ BUFFER* Worker::get_out_buffer(){
 //
 /////////////////////////////////////////////////////////////////////////
 
-Collector::Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size) : n_buffers(wout_bfs->size()), ProcessingElement(sliding_size){
+Collector::Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len) : n_buffers(wout_bfs->size()), ProcessingElement(){
 	this->next_pop = Collector::rotate_pop(wout_bfs);
 	this->collector_buffer = new BUFFER(buffer_len); 
 }
@@ -200,7 +184,7 @@ void Collector::body(){
 			move_to_context(get_context());
 		this->end_time = std::chrono::high_resolution_clock::now();
 		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
-		this->update_stats(act_service_time);
+		this->update_ts(act_service_time);
 	};
 	this->collector_buffer->safe_push(EOS);
 	return;
@@ -224,6 +208,10 @@ BUFFER* Collector::get_out_buffer(){
 
 Context::Context(size_t context_id) : context_id(context_id){
 	this->trace = new std::deque<Worker*>();
+};
+
+Context::~Context(){
+	delete trace;
 };
 
 size_t Context::get_context_id(){
@@ -250,105 +238,19 @@ Worker* Context::move_out(){
 	return w;
 }
 
+
 long Context::get_avg_ts(){
-	return this->avg_ts;
+	long context_avg_ts = 0;
+	for(auto worker : *(this->get_trace()))
+		context_avg_ts+=worker->get_ts();
+	return context_avg_ts/=this->get_n_threads();
 }
-
-
-void Context::set_avg_ts(long new_avg){
-	 this->avg_ts = new_avg;
-}
-/*
-long Context::get_sd_ts(){
-	return this->sd_service_time;
-}
-void Context::set_sd_ts(long new_sd){
-	 this->sd_ts = new_sd;
-}*/
 
 /////////////////////////////////////////////////////////////////////////
 //
 //	Manager	
 //
 /////////////////////////////////////////////////////////////////////////
-
-
-void Manager::wake_workers(size_t n){
-	n = (n <= this->max_nw-this->nw) ? n : this->max_nw-this->nw;
-	n = (n <= this->idle_contexts.size()) ? n : this->idle_contexts.size();
-	Worker* w = NULL; 
-	Context *act_context, *to_wake;
-	for(auto i = 0; i < n; i++){
-		to_wake = this->idle_contexts.front();
-		this->idle_contexts.pop_front();
-		act_context = this->active_contexts.front();
-		this->active_contexts.pop_front();
-		w = act_context->move_out();
-		to_wake->move_in(w);
-		this->active_contexts.push_front(to_wake);	
-		this->active_contexts.push_back(act_context);
-		this->nw++;
-	}	
-	this->redistribute();
-	return;
-}
-
-void Manager::idle_workers(size_t n){ 
-	n = (n < this->active_contexts.size()) ? n : this->active_contexts.size()-1; //ne lascio almen un sveglio
-	Worker* w = NULL;
-	Context *act_context, *to_idle_context;
-	for(auto i = 0; i < n; i++){
-		to_idle_context = this->active_contexts.back();
-		this->active_contexts.pop_back();
-		while(to_idle_context->get_n_threads() > 0){ 
-			w = to_idle_context->move_out();
-			act_context = this->active_contexts.front();
-			act_context->move_in(w);
-			this->active_contexts.pop_front();
-			this->active_contexts.push_back(act_context); 
-			
-		}
-		this->idle_contexts.push_back(to_idle_context);	
-		this->nw--;
-	}
-	this->redistribute();
-	return;
-}
-
-//Refactorare??
-
-void Manager::update_contexts_stats(){
-	long sum_avg_contexts = 0, context_avg_ts;
-	for(auto context : this->active_contexts){
-		context_avg_ts = 0;
-		for(auto worker : *(context->get_trace()))
-			context_avg_ts+=worker->get_moving_avg_ts();
-		
-		context_avg_ts/=static_cast<long>(context->get_n_threads());
-		context->set_avg_ts(context_avg_ts);
-
-		sum_avg_contexts+=context_avg_ts;
-	}
-	this->set_contexts_avg_ts(sum_avg_contexts/static_cast<long>(this->nw));
-
-}
-
-void Manager::set_contexts_avg_ts(long new_value){
-	this->contexts_avg_ts = new_value;
-	return;
-}
-
-
-long Manager::get_contexts_avg_ts(){
-	return this->contexts_avg_ts;
-}
-
-long Manager::get_service_time_farm(){
-	return std::max({this->emitter->get_moving_avg_ts(),
-			this->collector->get_moving_avg_ts(),
-			this->get_contexts_avg_ts()});
-}
-
 
 
 //il throughput per ocllector ed emitter, usiamo la varianza perchè Prendono il task e lo mettono da un'altra parte
@@ -361,20 +263,24 @@ Manager::Manager(long ts_goal,
 		size_t max_nw,
 		size_t n_contexts,
 		long sliding_size
-		) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), ProcessingElement(sliding_size){
+		) : ts_goal(ts_goal), stop(stop), nw(nw), max_nw(max_nw), sliding_size(sliding_size), ProcessingElement(){
 	std::ostringstream file_name_stream;
+	this->nw_series =  new std::queue<size_t>();
 	this->emitter = emitter;
 	this->collector = collector;
+
 	this->emitter->set_context(0);
 	this->collector->set_context(0);
 	this->set_context(0);
+		
 	for(auto id_context = 0; id_context < n_contexts; id_context++)
 		this->idle_contexts.push_back(new Context(id_context));
-	//this->wake_worker(collector); // deve andare sopra l'emitter
-	//this->wake_worker(this); // deve andare sopra l'emitter
+
+	this->ts_lower_bound = this->ts_goal - this->ts_goal*2/10;
+	this->ts_lower_bound = (this->ts_lower_bound < 0) ? 0 : this->ts_lower_bound;
+	this->ts_upper_bound = this->ts_goal + this->ts_goal*2/10;
+
 	Context* context;
-	this->ts_upper_bound = this->ts_goal + this->ts_goal*4/10;
-	std::cout << "ts_upper_bound : " << this->ts_upper_bound << std::endl;
 	for(auto i = 0; i < nw; i++){
 		context = this->idle_contexts.front();
 		this->idle_contexts.pop_front();
@@ -391,33 +297,117 @@ Manager::Manager(long ts_goal,
 	return;
 }
 
-//devo poi aggiornare gli active e gli idle!
-void Manager::transfer_threads_to_idle_core(Context*& from){
-	if(this->idle_contexts.size() == 0)
-		return;
+Manager::~Manager(){
+	delete this->stop;
+	delete this->nw_series;
+}
 
-	Context *swap, **to;
-	std::deque<Worker*> *from_trace, *to_trace;
+//questo deve semplicemente essere una piccola ccortezza. Se sono in una buona posizione ma
+//mi rendo conto che la coda si sta sempre più ingrossando, allora evito di riempirla (c'ho anche il bound che è già buono. Quindi magari do un piccolo aumento di worker affinchè postponga il problema. Quindi serve un range erp il quale è stabile ma che non lo faccia diventare troppo veloce. In particolare devo definire dei largini per i quali quando è stabile, se detecta un bottleneck prova ad aumentare. Quindi anche se va più veloce del ts goal ma ritarda un bottleneck, aggiungi
+bool Manager::detect_bottlenecks(){
+	long acc = 0;
+	double mean_ts_ws, ro;
+	for(auto context : this->active_contexts)
+		for(auto worker : *context->get_trace())
+			acc += worker->get_ts();
+	mean_ts_ws = static_cast<double>(acc)/this->max_nw;	
+	ro = static_cast<double>(mean_ts_ws)/(this->emitter->get_ts()*this->max_nw);
+	return (ro > 0.5) ? true : false;
+}
 
-	from_trace = from->get_trace();
-	to = &this->idle_contexts.front();
-	to_trace = (*to)->get_trace();
-
-
-	for(Worker* w : *from_trace)
-		w->set_context((*to)->get_context_id());	
-	from_trace->swap(*to_trace);
-	
-	swap = from;
-	from = *to;
-	*to = swap;
-
+void Manager::wake_worker(){
+	if(this->idle_contexts.size() == 0) return;
+	Worker* w = NULL; 
+	Context *act_context, *to_wake;
+	to_wake = this->idle_contexts.front();
+	this->idle_contexts.pop_front();
+	act_context = this->active_contexts.front();
+	this->active_contexts.pop_front();
+	w = act_context->move_out();
+	to_wake->move_in(w);
+	this->active_contexts.push_front(to_wake);	
+	this->active_contexts.push_back(act_context);
+	this->nw++;
 	return;
 }
 
+void Manager::idle_worker(){ 
+	if(this->active_contexts.size() == 1) return;
+	Worker* w = NULL;
+	Context *act_context, *to_idle_context;
+	to_idle_context = this->active_contexts.back();
+	this->active_contexts.pop_back();
+	while(to_idle_context->get_n_threads() > 0){ 
+		w = to_idle_context->move_out();
+		act_context = this->active_contexts.front();
+		act_context->move_in(w);
+		this->active_contexts.pop_front();
+		this->active_contexts.push_back(act_context); 
+	}
+	this->idle_contexts.push_back(to_idle_context);	
+	this->nw--;
+	return;
+}
+
+
+
+
+void Manager::control_nw_policy(long farm_ts){
+	size_t nw = this->get_nw_moving_avg();
+	if(farm_ts <= this->ts_upper_bound && farm_ts >= this->ts_lower_bound && this->detect_bottlenecks()){
+		nw = ceil(static_cast<double>(farm_ts)/this->ts_lower_bound); 
+		nw = (nw <= this->max_nw) ? nw : this->max_nw;
+	}
+	else if(farm_ts > this->ts_upper_bound){
+		nw = ceil(static_cast<double>(farm_ts)/this->ts_lower_bound);
+		nw = (nw <= this->max_nw) ? nw : this->max_nw;
+	}
+	else if(farm_ts < this->ts_lower_bound){
+		nw = floor(static_cast<double>(this->ts_upper_bound)/farm_ts); 
+		nw = (nw < this->active_contexts.size()) ? nw :this->active_contexts.size() - 1;
+	}
+	this->update_nw_moving_avg(nw);
+	this->set_workers(this->get_nw_moving_avg());
+	return;
+}
+
+void Manager::set_workers(size_t nw){
+	if(nw > this->nw){
+		size_t to_add = nw - this->nw;
+		for(auto i = 0; i < to_add; i++)
+			this->wake_worker();
+	}
+	else if(nw < this->nw){
+		size_t to_remove = this->nw - nw;
+		for(auto i = 0; i < to_remove; i++)
+			this->idle_worker();
+	}
+	this->redistribute();
+}
+
+//i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
+//per risparmiare energie
+//ho provato a controllare se se un dato core ci sono altre app ma sia attraverso il throughtput sia attraverso il service time, non riesco perchè se posiziono un'app sul medesimo core di dove sta già girando la farm, tutti i contesti decrementano in modo uguale le prestazioni. Inoltre controllando da htop se aggiungo un'app diminuisce il carico su un app e viene incrementato il clock ma nonostante questo l'applicazione dell'autonous sotto controllo rimane appesantita dalla seconda. Come se ...?
+void Manager::body(){
+	long farm_ts = 0, time = 0, rest = 200; //rand() 
+	while(!(*this->stop)){
+		time+=rest;
+		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
+		farm_ts = this->get_service_time_farm();
+		this->control_nw_policy(farm_ts);
+		std::cout << "farm_ts: " << farm_ts << std::endl;
+		std::cout << " >> " << nw << std::endl;
+
+		if(this->data.is_open())
+			this->data << this->nw << "," << farm_ts << "," << time << "\n";
+	};
+	data.close();
+	return;
+}
+
+
 void Manager::redistribute(){
 	size_t r = this->max_nw / this->nw;
-	size_t m = this->max_nw % this->nw;
 	for(auto context : this->active_contexts)
 		this->resize(context, r);
 	Worker* w = NULL;
@@ -448,6 +438,40 @@ void Manager::resize(Context* context, size_t size){
 	return;	
 }
 
+
+
+size_t Manager::get_nw_moving_avg(){
+	return ceil(static_cast<double>(this->acc)/this->pos);
+}
+
+void Manager::update_nw_moving_avg(size_t new_value){
+	this->acc += new_value;
+	this->nw_series->push(new_value);
+	if(this->pos <= this->sliding_size)
+		this->pos++;	
+	else{
+		this->acc -= this->nw_series->front();
+		this->nw_series->pop();
+	}
+	return;
+}
+
+long Manager::get_service_time_farm(){
+	long contexts_ts_avg = 0;	
+	for(auto context : this->active_contexts)
+		contexts_ts_avg+=context->get_avg_ts();	
+	contexts_ts_avg/=this->nw;
+	return std::max({this->emitter->get_ts(),
+			this->collector->get_ts(),
+			contexts_ts_avg/static_cast<long>(this->nw)
+			});
+}
+
+void Manager::run(){
+	this->thread = new std::thread(&Manager::body, this);
+	return;
+}
+
 void Manager::info(){
 	std::cout << "\n***************" << std::endl;
 	//for(auto context : this->active_contexts){
@@ -464,143 +488,68 @@ void Manager::info(){
 	for(auto const& context : active_contexts){
 		std::deque<Worker*>* trace = context->get_trace();
 		for(auto const& w : *trace){
-			std::cout << "Worker " << w->get_id() << ": " << w->get_moving_avg_ts()  << std::endl;
+			std::cout << "Worker " << w->get_id() << ": " << w->get_ts()  << std::endl;
 		}
 	}
 
 	return;
 }
 
-//questo deve semplicemente essere una piccola ccortezza. Se sono in una buona posizione ma
-//mi rendo conto che la coda si sta sempre più ingrossando, allora evito di riempirla (c'ho anche il bound che è già buono. Quindi magari do un piccolo aumento di worker affinchè postponga il problema. Quindi serve un range erp il quale è stabile ma che non lo faccia diventare troppo veloce. In particolare devo definire dei largini per i quali quando è stabile, se detecta un bottleneck prova ad aumentare. Quindi anche se va più veloce del ts goal ma ritarda un bottleneck, aggiungi
-bool Manager::detect_bottlenecks(){
-	long acc = 0;
-	for(auto context : this->active_contexts){
-		for(auto worker : *context->get_trace()){
-			acc += worker->get_moving_avg_ts();
-		}
-	}
-	//std::cout << " acc  " << acc/static_cast<long>(this->max_nw) << std::endl;
-	//std::cout << " emitter  " << this->emitter->get_moving_avg_ts() << std::endl;
-	//std::cout << " round  " << this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw) << std::endl;
-	double mean_ts_ws = acc/static_cast<long>(this->max_nw);	
-	double ro = (mean_ts_ws)/(this->emitter->get_moving_avg_ts()*static_cast<long>(this->max_nw));
-	/*
-	if(ro>1){ 
-		long nw = mean_ts_ws/this->emitter->get_moving_avg_ts();
-		std::cout << "should add " << nw << std::endl;
-		if(nw > this->max_nw-this->nw)
-			return;
-		this->wake_workers(1);
-	}*/
-	std::cout << " ro " << ro << std::endl;
-	return (ro > 0.6) ? true : false;
-}
 
+/*
 //Assumo che i task siano distribuiti a caso perciò se la media di un core si distacca molto allora significa che c'è un'altra app sopra
 void Manager::is_application_overlayed(){
 	long diff = 0;
 	for(auto context : this->active_contexts){
 		diff = context->get_avg_ts() - this->get_contexts_avg_ts();
-		long threshold = this->get_moving_avg_ts()*50/100;
-		if(diff>0){
-			std::cout << "-----" << std::endl;
-			std::cout << diff << std::endl;
-			std::cout << threshold << std::endl;
-			std::cout << (diff > threshold) << std::endl;
-			std::cout << "-----" << std::endl;
-		}
-		if( diff > 0 && diff > threshold){
-			std::cout << "switched" << context->get_context_id() << "\n";
-			this->transfer_threads_to_idle_core(context);
-		}
+		long threshold = this->get_ts()*50/100;
+		if( diff > 0 && diff > threshold)
+			this->transfer_threads_to_idle_core(context);	
 		this->update_contexts_stats();
 	}
 }
 
-void Manager::control_nw_policy(long prev_time, long time, long prev_farm_ts, long farm_ts){
-	double slope = (double) (farm_ts-prev_farm_ts)/(time-prev_time); //se negativo siamo in discesa
-	std::cout << "slope: " << slope << std::endl;
-	double q = farm_ts - slope*time; // y = mx + q;
-	std::cout << "q: " << q << std::endl;
-	long future_time = time+500;
-	long predicted_farm_ts = slope*future_time + q;
-	std::cout << "predicted_farm_ts: " << predicted_farm_ts << std::endl;
-	if(farm_ts <= this->ts_upper_bound && farm_ts >= this->ts_goal && this->detect_bottlenecks()){
-		size_t nw = farm_ts/this->ts_goal; //Se non ci sono abbastanza nw, wake_workers non li add
-		std::cout << "BBBBBBBB " << nw << std::endl;
-		this->wake_workers(nw);
+void Manager::transfer_threads_to_idle_core(Context*& from){
+	if(this->idle_contexts.size() == 0)
 		return;
-	}
-	if(farm_ts > this->ts_upper_bound){
-		size_t nw = farm_ts/this->ts_upper_bound;
-		std::cout << "DDDDDDDDDDDd " << nw << std::endl;
-		this->wake_workers(nw);
-	}
-	if(farm_ts < this->ts_goal){
-		std::cout << "CCCCCCCCC " << nw << std::endl;
-		size_t nw = this->ts_goal/farm_ts;
-		this->idle_workers(nw);
-		return;
-	}
-	//la domanda è nw devo aggiungerli/rimuoverli o è a quanto devo settare? Secondo me quanti aggiungerne
+
+	Context *swap, **to;
+	std::deque<Worker*> *from_trace, *to_trace;
+
+	from_trace = from->get_trace();
+	to = &this->idle_contexts.front();
+	to_trace = (*to)->get_trace();
+
+
+	for(Worker* w : *from_trace)
+		w->set_context((*to)->get_context_id());	
+	from_trace->swap(*to_trace);
 	
+	swap = from;
+	from = *to;
+	*to = swap;
 
-
-	std::cout << "stable? " << (farm_ts > this->ts_upper_bound && farm_ts < this->ts_goal) << std::endl;
 	return;
 }
 
-//i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
-//per risparmiare energie
-//ho provato a controllare se se un dato core ci sono altre app ma sia attraverso il throughtput sia attraverso il service time, non riesco perchè se posiziono un'app sul medesimo core di dove sta già girando la farm, tutti i contesti decrementano in modo uguale le prestazioni. Inoltre controllando da htop se aggiungo un'app diminuisce il carico su un app e viene incrementato il clock ma nonostante questo l'applicazione dell'autonous sotto controllo rimane appesantita dalla seconda. Come se ...?
-void Manager::body(){
-	std::chrono::high_resolution_clock::time_point start_time, end_time;
-	long act_service_time, prev_farm_ts = 0, farm_ts = 0;
-	long prev_time = 0, time = 0;
-	prev_farm_ts = this->get_service_time_farm();
-	while(!(*this->stop)){
-		std::cout << " >> " << nw << std::endl;
-		long rest = rand() % 1200 + 200;
-		time+=rest;
-		std::this_thread::sleep_for(std::chrono::milliseconds(rest));
-		start_time = std::chrono::high_resolution_clock::now();
-		//info();
-		//is_application_overlayed();
-		this->detect_bottlenecks();
-		farm_ts = this->get_service_time_farm();
-		this->control_nw_policy(prev_time, time, prev_farm_ts, farm_ts);
-				/*std::cout << " Service_Time " << act_farm_ts << "\n" << std::endl;
-			if( act_farm_ts > this->ts_goal){	
-			size_t n = act_farm_ts/ts_goal; //devono esserci totali n! oppure devono essere aggiunti n?
-			if(n < 0){ std::cout << "MALE " << std::endl; return;}
-			this->wake_workers(n);
-		}else if(act_farm_ts < this->ts_goal*50/100){
-			size_t n = this->ts_goal*95/100/act_farm_ts; //devono esserci totali n! oppure devono essere aggiunti n?
-			this->idle_workers(n);
-		}else{
-			std::cout << "stable" << std::endl;
-		}*/
-		if(this->data.is_open())
-			this->data << this->nw << "," << farm_ts << "," << time << "\n";
 
-		prev_farm_ts = farm_ts;
-		prev_time = time;
-
-		end_time = std::chrono::high_resolution_clock::now();
-		act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-		this->update_stats(act_service_time);
-	};
-	data.close();
-	return;
-
+void Manager::update_contexts_stats(){
+	long sum_avg_contexts = 0, context_avg_ts = 0;
+	for(auto context : this->active_contexts)
+		sum_avg_contexts+=context->get_avg_ts();	
+	this->set_contexts_avg_ts(sum_avg_contexts/static_cast<long>(this->nw));
 }
 
-void Manager::run(){
-	this->thread = new std::thread(&Manager::body, this);
+void Manager::set_contexts_avg_ts(long new_value){
+	this->contexts_avg_ts = new_value;
 	return;
 }
 
+long Manager::get_contexts_avg_ts(){
+	return this->contexts_avg_ts;
+}
+
+*/
 /////////////////////////////////////////////////////////////////////////
 //
 //	Autonomic Farm	
@@ -608,15 +557,15 @@ void Manager::run(){
 /////////////////////////////////////////////////////////////////////////
 
 
-Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size){ 
-	Worker* worker = new Worker(this->fun_body, buffer_len, sliding_size);
+Worker* Autonomic_Farm::add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len){ 
+	Worker* worker = new Worker(this->fun_body, buffer_len);
 	win_bfs->push_back(worker->get_in_buffer());
 	wout_bfs->push_back(worker->get_out_buffer());
 	(*this->workers).push_back(worker);
 	return worker;
 }
 
-Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size) : ts_goal(ts_goal), fun_body(fun_body){ 
+Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size = 100) : fun_body(fun_body){ 
 	if(nw > max_nw){
 		std::cout << "Error nw > max_nw" << std::endl;
 		return;
@@ -634,12 +583,12 @@ Autonomic_Farm::Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::func
 	std::vector<BUFFER*>* wout_bfs = new std::vector<BUFFER*>();	
 
 	for(auto i = 0; i < this->max_nw; i++) 
-		this->add_worker(win_bfs, wout_bfs, buffer_len, sliding_size);
+		this->add_worker(win_bfs, wout_bfs, buffer_len);
 
-	this->emitter = new Emitter(win_bfs, buffer_len, collection, sliding_size);
-	this->collector = new Collector(wout_bfs, buffer_len, sliding_size);
+	this->emitter = new Emitter(win_bfs, buffer_len, collection);
+	this->collector = new Collector(wout_bfs, buffer_len);
 
-	this->manager = new Manager(this->ts_goal,
+	this->manager = new Manager(ts_goal,
 			this->stop, this->emitter,
 			this->collector, this->workers,
 			nw, this->max_nw, n_contexts, sliding_size);
@@ -662,13 +611,6 @@ void Autonomic_Farm::join(){
 	this->manager->join();
 	return;
 }
-
-/* altrimenti devo gestire il caso togliendo le push del collector
-void Autonomic_Farm::run_and_wait(){
-	this->run();
-	this->join();
-}
-*/
 
 size_t Autonomic_Farm::pop_outputs(){
 	void* task = 0;

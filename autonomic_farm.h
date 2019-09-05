@@ -42,17 +42,16 @@ class ProcessingElement{
 		std::mutex *context_id_lock, *stats_lock;
 		size_t thread_id, context_id = 0;
 		std::chrono::high_resolution_clock::time_point start_time, end_time;
-		long sliding_size = 0, moving_avg = 0;
-		long pos = 0;
-	
+		long service_time = 0;	
+
 		virtual void body() = 0;
 		virtual void run() = 0;
 
-		ProcessingElement(long sliding_size);
+		ProcessingElement();
 
 		~ProcessingElement();
 
-		void update_stats(long act_service_time);
+		void update_ts(long act_service_time);
 		
 
 	public:
@@ -66,7 +65,7 @@ class ProcessingElement{
 
 		int move_to_context(size_t id_context);
 
-		long get_moving_avg_ts();
+		long get_ts();
 
 
 };
@@ -83,6 +82,8 @@ class Emitter : public ProcessingElement{
 		std::function<void(void*)> next_push;
 		std::vector<ssize_t>* collection;
 		BUFFER* emitter_buffer; 
+
+		void body();
 		
 		std::function<void(void*)> rotate_push(std::vector<BUFFER*>* buffers){
 			size_t id_queue = 0;
@@ -91,11 +92,10 @@ class Emitter : public ProcessingElement{
 				(id_queue < buffers->size()-1) ? id_queue++ : id_queue = 0;	
 			};
 		}
+		
 
 	public:
-		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size);
-
-		void body();
+		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection);
 
 		void run();
 
@@ -116,11 +116,11 @@ class Worker : public ProcessingElement{
 		BUFFER* win_bf;
 		BUFFER* wout_bf;
 
+		void body();
+
 	public: 
 
-		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, long sliding_size);
-
-		void body();
+		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len);
 
 		void run();
 
@@ -142,6 +142,8 @@ class Collector: public ProcessingElement{
 		std::function<void(void**)> next_pop;
 		BUFFER* collector_buffer;
 
+		void body();
+
 		std::function<void(void**)> rotate_pop(std::vector<BUFFER*>* buffers){
 			size_t id_queue{0};
 			return [id_queue, buffers](void** task) mutable {
@@ -150,10 +152,9 @@ class Collector: public ProcessingElement{
 			};
 		}
 
-	public:
-		Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_leni, long sliding_size);
 
-		void body();
+	public:
+		Collector(std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
 
 		void run();
 
@@ -171,10 +172,11 @@ class Context{
 		const size_t context_id;
 		std::deque<Worker*>* trace;	
 		long avg_ts = 0, sd_ts = 0;
-		//deconstructor delete trace
 	
 	public:
 		Context(size_t context_id);
+
+		~Context();
 
 		size_t get_context_id();
 
@@ -188,13 +190,6 @@ class Context{
 
 		long get_avg_ts();
 
-		void set_avg_ts(long new_avg);
-
-		/*
-		long get_sd_ts();
-
-		void set_sd_ts(long new_sd);
-*/
 };
 
 
@@ -209,40 +204,55 @@ class Manager : public ProcessingElement{
 	private:
 		std::ofstream data;
 		size_t nw;
+		std::atomic<bool>* stop;
 		const size_t max_nw;
 		const long ts_goal;
-		long ts_upper_bound;
-		std::atomic<bool>* stop;
+		long ts_upper_bound, ts_lower_bound; 
 		Emitter* emitter;
 		Collector* collector;
-		std::deque<Worker*> ws_queue;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
 		std::deque<Context*> idle_contexts = std::deque<Context*>();
-		long contexts_avg_ts = 0;
+		std::deque<Worker*> ws_queue;
+
+		std::queue<size_t>* nw_series; 
+		long pos = 0, sliding_size, acc = 0;
 	
-		void wake_workers(size_t n);
 
-		void idle_workers(size_t n);
-		
-		long get_service_time_farm();
+		void set_workers(size_t nw);
 
-		void transfer_threads_to_idle_core(Context*& from); 
+		void wake_worker();
+
+		void idle_worker();
 		
+		void control_nw_policy(long farm_ts);
+
+		bool detect_bottlenecks();
+	
 		void redistribute();
 
 		void resize(Context* context, size_t size);
 
-		void control_nw_policy(long prev_time, long time, long prev_farm_ts, long farm_ts);
+		void update_nw_moving_avg(size_t new_value);
+
+		size_t get_nw_moving_avg();
+
+		long get_service_time_farm();
+	
+		void body();
+
+	/*	
+		void is_application_overlayed();
+
+		void transfer_threads_to_idle_core(Context*& from); 
 
 		void update_contexts_stats();
 		
 		long get_contexts_avg_ts();
 
 		void set_contexts_avg_ts(long new_value);
+		
+	*/
 
-		void is_application_overlayed();
-
-		bool detect_bottlenecks();
 
 	public:
 		Manager(long ts_goal, std::atomic<bool>* stop,
@@ -251,7 +261,8 @@ class Manager : public ProcessingElement{
 				std::vector<Worker*>* workers,
 				size_t nw, size_t max_nw, size_t n_contexts, long sliding_size);
 
-		void body();
+
+		~Manager();
 
 		void run();
 
@@ -267,7 +278,6 @@ class Manager : public ProcessingElement{
 
 class Autonomic_Farm{
 	private:
-		const long ts_goal; //non dovrebbe servire
 		const std::function<ssize_t(ssize_t)> fun_body;
 		unsigned int max_nw;
 		std::atomic<bool>* stop;
@@ -276,7 +286,7 @@ class Autonomic_Farm{
 		std::vector<Worker*>* workers;
 		Collector* collector;
 
-		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len, long sliding_size);
+		Worker* add_worker(std::vector<BUFFER*>* win_bfs, std::vector<BUFFER*>* wout_bfs, size_t buffer_len);
 
 
 	public:
