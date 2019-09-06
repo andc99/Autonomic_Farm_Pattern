@@ -92,11 +92,11 @@ int isPrime(size_t x){
 	if(x==2)
 		return 1;
 	if(x%2==0)
-		return 0;
+		return -1;
 	int i = 2, sqr = sqrt(x);
 	while(i <= sqr){
 		if(x % i == 0)
-			return 0;
+			return -1;
 		i++;
 	}	
     //	std::this_thread::sleep_for (std::chrono::seconds(1));

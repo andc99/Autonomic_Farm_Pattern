@@ -42,7 +42,7 @@ class ProcessingElement{
 		std::mutex *context_id_lock, *stats_lock;
 		size_t thread_id, context_id = 0;
 		std::chrono::high_resolution_clock::time_point start_time, end_time;
-		long service_time = 0;	
+		size_t service_time = 0;	
 
 		virtual void body() = 0;
 		virtual void run() = 0;
@@ -51,7 +51,7 @@ class ProcessingElement{
 
 		~ProcessingElement();
 
-		void update_ts(long act_service_time);
+		void update_ts(size_t act_service_time);
 		
 
 	public:
@@ -65,7 +65,7 @@ class ProcessingElement{
 
 		int move_to_context(size_t id_context);
 
-		long get_ts();
+		size_t get_ts();
 
 
 };
@@ -171,7 +171,6 @@ class Context{
 	private:
 		const size_t context_id;
 		std::deque<Worker*>* trace;	
-		long avg_ts = 0, sd_ts = 0;
 	
 	public:
 		Context(size_t context_id);
@@ -188,7 +187,7 @@ class Context{
 
 		Worker* move_out();
 
-		long get_avg_ts();
+		size_t get_avg_ts();
 
 };
 
@@ -203,11 +202,10 @@ class Context{
 class Manager : public ProcessingElement{
 	private:
 		std::ofstream data;
-		size_t nw;
 		std::atomic<bool>* stop;
 		const size_t max_nw;
-		const long ts_goal;
-		long ts_upper_bound, ts_lower_bound; 
+		const size_t ts_goal;
+		size_t ts_upper_bound, ts_lower_bound; 
 		Emitter* emitter;
 		Collector* collector;
 		std::deque<Context*> active_contexts = std::deque<Context*>();
@@ -215,16 +213,15 @@ class Manager : public ProcessingElement{
 		std::deque<Worker*> ws_queue;
 
 		std::queue<size_t>* nw_series; 
-		long pos = 0, sliding_size, acc = 0;
-	
+		size_t pos = 0, sliding_size, acc = 0;
 
-		void set_workers(size_t nw);
+		void threads_scheduling_policy(size_t new_nw);
+
+		void concurrency_throttling(); //check
 
 		void wake_worker();
 
 		void idle_worker();
-		
-		void control_nw_policy(long farm_ts);
 
 		bool detect_bottlenecks();
 	
@@ -236,7 +233,9 @@ class Manager : public ProcessingElement{
 
 		size_t get_nw_moving_avg();
 
-		long get_service_time_farm();
+		size_t get_avg_service_time_contexts();
+
+		size_t get_service_time_farm();
 	
 		void body();
 
@@ -244,22 +243,20 @@ class Manager : public ProcessingElement{
 		void is_application_overlayed();
 
 		void transfer_threads_to_idle_core(Context*& from); 
+	
+		size_t get_contexts_avg_ts();
 
-		void update_contexts_stats();
-		
-		long get_contexts_avg_ts();
-
-		void set_contexts_avg_ts(long new_value);
+		void set_contexts_avg_ts(size_t new_value);
 		
 	*/
 
 
 	public:
-		Manager(long ts_goal, std::atomic<bool>* stop,
+		Manager(size_t ts_goal, std::atomic<bool>* stop,
 				Emitter* emitter,
 				Collector* collector,
 				std::vector<Worker*>* workers,
-				size_t nw, size_t max_nw, size_t n_contexts, long sliding_size);
+				size_t nw, size_t max_nw, size_t n_contexts, size_t sliding_size);
 
 
 		~Manager();
@@ -291,7 +288,7 @@ class Autonomic_Farm{
 
 	public:
 
-		Autonomic_Farm(long ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, long sliding_size);
+		Autonomic_Farm(size_t ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, size_t sliding_size);
 
 		void run();
 
