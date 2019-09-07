@@ -13,7 +13,7 @@
 
 class Worker : public ProcessingElement{
 	private:
-		std::function<ssize_t(ssize_t)> fun_body;
+		std::function<size_t(size_t)> fun_body;
 		BUFFER* win_bf;
 		BUFFER* wout_bf;
 
@@ -40,7 +40,7 @@ class Worker : public ProcessingElement{
 
 	public: 
 
-		Worker(std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len) : ProcessingElement(){
+		Worker(std::function<size_t(size_t)> fun_body, size_t buffer_len) : ProcessingElement(){
 			this->fun_body = fun_body;
 			this->win_bf = new BUFFER(buffer_len); 
 			this->wout_bf = new BUFFER(buffer_len); 

@@ -33,8 +33,6 @@ class Manager : public ProcessingElement{
 		size_t pos = 0, sliding_size, acc = 0;
 
 
-//i worker aumentato con la bottleneck mi vengono deschedulati perché act_farm_ts mi fa scattare l'idle 
-//per risparmiare energie
 //ho provato a controllare se se un dato core ci sono altre app ma sia attraverso il throughtput sia attraverso il service time, non riesco perchè se posiziono un'app sul medesimo core di dove sta già girando la farm, tutti i contesti decrementano in modo uguale le prestazioni. Inoltre controllando da htop se aggiungo un'app diminuisce il carico su un app e viene incrementato il clock ma nonostante questo l'applicazione dell'autonous sotto controllo rimane appesantita dalla seconda. Come se ...?
 		void body(){
 			size_t farm_ts = 0, time = 0, rest = 200; //rand() 
@@ -173,8 +171,9 @@ class Manager : public ProcessingElement{
 		}
 
 		void resize(Context* context, size_t size){
+			Worker* w;
 			while(context->get_n_threads() > size){
-				Worker* w = context->move_out();
+				 w = context->move_out();
 				this->ws_queue.push_front(w);
 			}
 			return;	
@@ -260,26 +259,23 @@ class Manager : public ProcessingElement{
 
 		void info(){
 			std::cout << "\n***************" << std::endl;
-			//for(auto context : this->active_contexts){
-			//	std::cout << "ID: " << context->get_context_id() << " TS: " << context->get_mean_service_time() << " VAR: " << context->get_sd_service_time() << std::endl;
-			//}
-			std::cout << " ACTIVE " << std::endl;
-	for(auto i = 0; i < this->active_contexts.size(); i++)
-		std::cout << this->active_contexts[i]->get_context_id() << " - " << this->active_contexts[i]->get_n_threads() << std::endl;
-	std::cout << " IDLE " << std::endl;
-	for(auto i = 0; i < this->idle_contexts.size(); i++)
-		std::cout << this->idle_contexts[i]->get_context_id() << " - " << this->idle_contexts[i]->get_n_threads() << std::endl;
-	std::cout << " -------- " << std::endl;
+			std::cout << " ACTIVE CONTEXTS " << std::endl;
+			for(auto act_context : this->active_contexts)
+				std::cout << act_context->get_context_id() << "/ N° threads " << act_context->get_n_threads() << "/ Tcontext " << act_context->get_avg_ts() << std::endl;;
+			std::cout << " -------- " << std::endl;
+			std::cout << " IDLE CONTEXTS" << std::endl;
+			for(auto idle_context : this->idle_contexts)
+				std::cout << idle_context->get_context_id() << "/ N° threads " << idle_context->get_n_threads() << "/ Tcontext " << idle_context->get_avg_ts() << std::endl;;
+			std::cout << " --------\n    WORKERS" << std::endl;
+			for(auto const& context : this->active_contexts){
+				std::deque<Worker*>* trace = context->get_trace();
+				for(auto const& w : *trace){
+					std::cout << "Worker " << w->get_id() << "--> Tw " << w->get_ts()  << std::endl;
+				}
+			}
 
-	for(auto const& context : this->active_contexts){
-		std::deque<Worker*>* trace = context->get_trace();
-		for(auto const& w : *trace){
-			std::cout << "Worker " << w->get_id() << ": " << w->get_ts()  << std::endl;
+			return;
 		}
-	}
-
-	return;
-}
 
 
 /*

@@ -14,13 +14,13 @@ class Emitter : public ProcessingElement{
 	private:
 		const size_t n_buffers;
 		std::function<void(void*)> next_push;
-		std::vector<ssize_t>* collection;
+		std::vector<size_t>* collection;
 
 		void body(){
 			size_t act_service_time = 0, act_context_id = 0;
 			for(auto i = 0; i < (*collection).size(); i++){
 				this->start_time = std::chrono::high_resolution_clock::now();
-				ssize_t &task = (*collection)[i];
+				size_t &task = (*collection)[i];
 				this->next_push(&task);
 				if ( (act_context_id = this->get_context() ) != sched_getcpu())
 					move_to_context(act_context_id);
@@ -43,7 +43,7 @@ class Emitter : public ProcessingElement{
 
 	public:
 
-		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<ssize_t>* collection) : n_buffers(win_bfs->size()), ProcessingElement(){
+		Emitter(std::vector<BUFFER*>* win_bfs, size_t buffer_len, std::vector<size_t>* collection) : n_buffers(win_bfs->size()), ProcessingElement(){
 			this->next_push = Emitter::rotate_push(win_bfs);
 			this->collection = collection;
 		}

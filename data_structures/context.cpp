@@ -40,7 +40,7 @@ Worker* Context::move_out(){
 
 size_t Context::get_avg_ts(){
 	size_t context_avg_ts = 0;
-	for(auto worker : *(this->get_trace()))
+	for(auto worker : *this->get_trace())
 		context_avg_ts+=worker->get_ts();
 	return context_avg_ts/this->get_n_threads();
 }

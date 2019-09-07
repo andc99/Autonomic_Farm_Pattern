@@ -1,9 +1,13 @@
+#ifndef AUTONOMIC_FARM_HPP
+#define AUTONOMIC_FARM_HPP
+
 #include <stdlib.h>
 #include <iostream>
 #include <math.h>
 #include <vector>
 #include <thread>
 
+#include "processing_element.h"
 #include "emitter.hpp"
 #include "worker.hpp"
 #include "collector.hpp"
@@ -18,7 +22,7 @@
 
 class Autonomic_Farm{
 	private:
-		const std::function<ssize_t(ssize_t)> fun_body; //anche questo va cambiato
+		const std::function<size_t(size_t)> fun_body;
 		size_t max_nw;
 		std::atomic<bool>* stop;
 		Manager* manager;
@@ -37,7 +41,7 @@ class Autonomic_Farm{
 
 	public:
 
-		Autonomic_Farm(size_t ts_goal, size_t nw, size_t max_nw, std::function<ssize_t(ssize_t)> fun_body, size_t buffer_len, std::vector<ssize_t>* collection, size_t sliding_size = 100) : fun_body(fun_body){ 
+		Autonomic_Farm(size_t ts_goal, size_t nw, size_t max_nw, std::function<size_t(size_t)> fun_body, size_t buffer_len, std::vector<size_t>* collection, size_t sliding_size = 100) : fun_body(fun_body){ 
 			if(nw > max_nw) nw = max_nw;
 			if(ts_goal < 1) ts_goal = 1;
 
@@ -67,7 +71,7 @@ class Autonomic_Farm{
 
 		void run(){
 			this->emitter->run();
-			for(auto worker : (*this->workers))
+			for(auto worker : *this->workers)
 				worker->run();	
 			this->manager->run();
 			this->collector->run();	
@@ -75,10 +79,10 @@ class Autonomic_Farm{
 		}
 
 		void join(){
-			for(auto worker : (*this->workers))
+			for(auto worker : *this->workers)
 				worker->join();	
 			this->collector->join();
-			*(this->stop) = true;
+			*this->stop = true;
 			this->manager->join();
 			return;
 		}
@@ -94,4 +98,4 @@ class Autonomic_Farm{
 
 
 
-
+#endif

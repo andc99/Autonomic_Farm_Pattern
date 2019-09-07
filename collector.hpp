@@ -30,7 +30,7 @@ class Collector: public ProcessingElement{
 				act_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
 				this->update_ts(act_service_time);
 			};
-			this->collector_buffer->safe_push(EOS);
+			while(!(this->collector_buffer->safe_push(EOS))) continue;
 			return;
 		}
 
