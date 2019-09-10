@@ -110,7 +110,7 @@ long sequential(std::function<ssize_t(ssize_t)> fun_body, std::vector<size_t>* c
 
 int main(int argc, const char** argv){
 	if(argc < 7){
-		std::cout << "Missing Arguments.\nExample: " << argv[0] << " n_tasks nw max_nw buffer_len ts_goal sliding_size" << std::endl;
+		std::cout << "Missing Arguments.\nExample: " << argv[0] << " n_tasks n_threads buffer_len sticky" << std::endl;
 		return 1;
 	}
 
