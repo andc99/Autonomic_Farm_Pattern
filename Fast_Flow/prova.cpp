@@ -31,8 +31,9 @@ struct Seq: ff_node_t<long> {
 	}
 
 	long *svc(long *) {
-		for(auto i : *this->collection) 
+		for(auto i = 0; i < this->collection->size(); i++){
 			ff_send_out(new long((*collection)[i]));
+		}
 		return EOS;
 	}
 	
@@ -119,10 +120,11 @@ class Emitter: public ff_monode_t<long> {
 
 		void remove_worker(){
 			if(this->ts_active_nw.size() <= 1) return; //1 deve essere srempre attivo peròò
-			int chosen_nw = this->ts_active_nw.begin()->first;
+			int chosen_nw = this->ready->back(); //this->ts_active_nw.begin()->first;
 			ff_send_out_to(GO_OUT, chosen_nw);
 			this->sleeping->push_front(chosen_nw);
 			this->ts_active_nw.erase(chosen_nw);
+			this->ready->pop_back();
 			printf("REMOVE wid %d\n", chosen_nw);
 		}
 
@@ -218,13 +220,13 @@ class Emitter: public ff_monode_t<long> {
 		long* svc(long* task) {     
 			int wid = get_channel_id();
 			this->start_time = std::chrono::high_resolution_clock::now();
-			if(check_concurrency(rest)){ //Test fixed to 200milliseconds to compare with the pthread implementation
-				long TsFarm = this->get_service_time_farm(); 
-				if(this->to_save.is_open())
-					this->to_save << this->ts_active_nw.size() << "," << TsFarm << "," << time << "\n";
-				time+=rest;
-				this->concurrency_throttling();
-			};
+	//		if(check_concurrency(rest)){ //Test fixed to 200milliseconds to compare with the pthread implementation
+	//			long TsFarm = this->get_service_time_farm(); 
+	//			if(this->to_save.is_open())
+	//				this->to_save << this->ts_active_nw.size() << "," << TsFarm << "," << time << "\n";
+	//			time+=rest;
+	//			this->concurrency_throttling();
+	//			};
 			if (wid == -1) { // task coming from seq
 				if(!this->ready->empty()){
 					int chosen_nw = this->ready->back();
@@ -370,13 +372,13 @@ int main(int argc, char* argv[]) {
 	std::vector<long> collection;
 	long t1 = 400, t2 = 100, t3 = 800; //da passare per parametro
 	for(long i = 0; i < n_tasks/3; i++)
-		collection.push_back(t1);
+		collection.push_back(t2);
 
 	for(long i = n_tasks/3; i < n_tasks*2/3; i++)
 		collection.push_back(t2);
 
 	for(long i = n_tasks*2/3; i < n_tasks; i++)
-		collection.push_back(t3);
+		collection.push_back(t2);
 
 	Seq seq(&collection);
 	std::vector<ff_node*> W;
@@ -396,6 +398,7 @@ int main(int argc, char* argv[]) {
 	ff_autonomic_farm.add_collector(&C);
 	ff_autonomic_farm.wrap_around();
 
+	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
 	ff_Pipe<> pipe(seq, ff_autonomic_farm);
 
 	if (pipe.run_then_freeze()<0) {
@@ -404,6 +407,9 @@ int main(int argc, char* argv[]) {
 	}            
 	pipe.wait_freezing();
 	pipe.wait();
+	std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
+	long act = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+	std::cout << "FF TIME " << act << std::endl;
 
 	return 0;
 }

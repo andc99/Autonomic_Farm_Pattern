@@ -180,16 +180,16 @@ int main(int argc, const char** argv){
 	t2 = 100;
 	t3 = 800;
 	for(size_t i = 0; i < n_tasks/3; i++){
-		collection_seq.push_back(t1);
-		collection_par.push_back(t1);
+		collection_seq.push_back(t2);
+		collection_par.push_back(t2);
 	}
 	for(size_t i = n_tasks/3; i < n_tasks*2/3; i++){
 		collection_seq.push_back(t2);
 		collection_par.push_back(t2);
 	}
 	for(size_t i = n_tasks*2/3; i < n_tasks; i++){
-		collection_seq.push_back(t3);
-		collection_par.push_back(t3);
+		collection_seq.push_back(t2);
+		collection_par.push_back(t2);
 	}
 /*	
 	size_t val = 4294967291; //, 536870909, 2147483629;
@@ -204,17 +204,10 @@ int main(int argc, const char** argv){
 	par_time = parallel(ts_goal, n_threads, n_max_threads, test, buffer_len, &collection_par, sliding_size);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
-//	seq_time = sequential(test, &collection_seq);
-//	std::cout << "Seq_TIME: " << seq_time << std::endl;
+	seq_time = sequential(test, &collection_seq);
+	std::cout << "Seq_TIME: " << seq_time << std::endl;
 
-//	std::cout << "Scalability " << (float) seq_time/par_time << std::endl;
-/*	for(auto i : collection_par)
-		std::cout << i << std::endl;
-	
-	std::cout << "----  ----" << std::endl;
-	for(auto i : collection_seq)
-		std::cout << i << std::endl;
-*/
+	std::cout << "Scalability " << (float) seq_time/par_time << std::endl;
 	std::cout << "Are Equal? " << (collection_par == collection_seq) << std::endl;
 
 	return 0;

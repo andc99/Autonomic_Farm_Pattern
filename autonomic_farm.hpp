@@ -73,7 +73,7 @@ class Autonomic_Farm{
 			this->emitter->run();
 			for(auto worker : *this->workers)
 				worker->run();	
-			this->manager->run();
+//			this->manager->run();
 			this->collector->run();	
 			return;
 		}
@@ -83,7 +83,7 @@ class Autonomic_Farm{
 				worker->join();	
 			this->collector->join();
 			*this->stop = true;
-			this->manager->join();
+//			this->manager->join();
 			return;
 		}
 
