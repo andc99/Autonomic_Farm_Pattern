@@ -204,10 +204,10 @@ int main(int argc, const char** argv){
 	par_time = parallel(ts_goal, n_threads, n_max_threads, test, buffer_len, &collection_par, sliding_size);
 	std::cout << "Par_TIME: " << par_time << std::endl;
 
-	seq_time = sequential(test, &collection_seq);
-	std::cout << "Seq_TIME: " << seq_time << std::endl;
+//	seq_time = sequential(test, &collection_seq);
+//	std::cout << "Seq_TIME: " << seq_time << std::endl;
 
-	std::cout << "Scalability " << (float) seq_time/par_time << std::endl;
+//	std::cout << "Scalability " << (float) seq_time/par_time << std::endl;
 /*	for(auto i : collection_par)
 		std::cout << i << std::endl;
 	

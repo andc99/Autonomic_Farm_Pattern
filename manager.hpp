@@ -19,7 +19,7 @@
 
 class Manager : public ProcessingElement{
 	private:
-		std::ofstream data;
+		std::ofstream to_save;
 		std::atomic<bool>* stop;
 		const size_t max_nw;
 		const size_t ts_goal;
@@ -37,17 +37,16 @@ class Manager : public ProcessingElement{
 		void body(){
 			size_t farm_ts = 0, time = 0, rest = 200; //rand() 
 			while(!(*this->stop)){
-				time+=rest;
 				std::this_thread::sleep_for(std::chrono::milliseconds(rest));
 				this->concurrency_throttling();
 				farm_ts = this->get_service_time_farm();
 				std::cout << "farm_ts: " << farm_ts << std::endl;
 				std::cout << " >> " << this->active_contexts.size() << std::endl;
-
-				if(this->data.is_open())
-					this->data << this->active_contexts.size() << "," << farm_ts << "," << time << "\n";
+				if(this->to_save.is_open())
+					this->to_save << this->active_contexts.size() << "," << farm_ts << "," << time << "\n";
+				time+=rest;
 			};
-			data.close();
+			to_save.close();
 			return;
 		}
 
@@ -220,9 +219,9 @@ class Manager : public ProcessingElement{
 				this->active_contexts[i%nw]->move_in((*workers)[i]);
 
 			file_name_stream << this->active_contexts.size() << "_" << this->max_nw << "_" << this->ts_goal << "_" << (*workers)[0]->get_in_buffer()->safe_get_size() << ".csv";
-			this->data.open("./data/"+file_name_stream.str());
-			if(this->data.is_open())
-				this->data << this->ts_goal << "\n" << this->ts_upper_bound << "\n" << "Degree,Service_Time,Time\n";
+			this->to_save.open("./data/"+file_name_stream.str());
+			if(this->to_save.is_open())
+				this->to_save << this->ts_goal << "\n" << this->ts_upper_bound << "\n" << this->ts_lower_bound << "\n" << "Degree,Service_Time,Time\n";
 			return;
 		}
 

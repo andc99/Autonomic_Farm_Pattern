@@ -1,7 +1,6 @@
 #include <thread>
 #include <map>
 #include <chrono>
-#include <atomic>
 #include <iostream>
 #include <functional>
 #include <fstream>
@@ -55,9 +54,9 @@ struct Collector: ff_minode_t<long> {
 
 		this->start_time = std::chrono::high_resolution_clock::now();
 		this->end_time = std::chrono::high_resolution_clock::now();
-		this->service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
+		long service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count() + 1;
 		this->processed++;
-		return task;
+		return new long(service_time);
 
 	}
 	void eosnotify(ssize_t) {
@@ -68,12 +67,7 @@ struct Collector: ff_minode_t<long> {
 		printf("Collector Ends\n");
 	}
 
-	long get_ts(){
-		return this->service_time;
-	}
-
 	std::chrono::high_resolution_clock::time_point start_time, end_time;	
-	std::atomic<long> service_time = 0;
 
 };
 
@@ -93,20 +87,19 @@ class Emitter: public ff_monode_t<long> {
 
 		long get_service_time_farm(){
 			return std::max({this->emitter_service_time,
-					this->collector->get_ts(),
+					this->collector_service_time,
 					this->get_Tw()
 					});
 		}
 
 
-		Emitter(unsigned max_nw, unsigned nw, long ts_goal, long sliding_size, Collector* c){
+		Emitter(unsigned max_nw, unsigned nw, long ts_goal, long sliding_size){
 			this->max_nw = max_nw;
 			this->nw = nw;
 			this->ts_goal = ts_goal;
 			this->ts_lower_bound = this->ts_goal - this->ts_goal*2/10;
 			this->ts_lower_bound = (this->ts_lower_bound < 0) ? 0 : this->ts_lower_bound;
 			this->ts_upper_bound = this->ts_goal + this->ts_goal*2/10;
-			this->collector = c;
 			this->nw_series = new std::queue<int>();
 			this->sliding_size = sliding_size;
 			this->ready = new std::deque<int>();
@@ -165,7 +158,7 @@ class Emitter: public ff_monode_t<long> {
 		void concurrency_throttling(){
 			long Tw = this->get_Tw();
 			long Te = this->emitter_service_time;
-			long Tc = this->collector->get_ts();
+			long Tc = this->collector_service_time;
 			/*std::cout << " Tw " << Tw << std::endl;
 			std::cout << " Te " << Te << std::endl;
 			std::cout << " Tc " << Tc << std::endl;*/
@@ -262,6 +255,7 @@ class Emitter: public ff_monode_t<long> {
 				this->emitter_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
 				return GO_ON;
 			}
+			this->collector_service_time = *task;
 			delete task;
 			onthefly--;
 			this->busy = this->max_nw - (this->ready->size() + this->sleeping->size()); //se non 0 c'è qualche worker che sta facendo qualcosa e questo lo invierà al collector che lo risputa sull'emitter
@@ -279,6 +273,7 @@ class Emitter: public ff_monode_t<long> {
 			this->emitter_service_time = std::chrono::duration_cast<std::chrono::microseconds>(this->end_time - this->start_time).count();
 			return GO_ON;
 		}
+
 		void svc_end() {
 			delete this->ready;
 			delete this->sleeping;
@@ -298,7 +293,6 @@ class Emitter: public ff_monode_t<long> {
 		}
 
 	private:
-		Collector* collector;
 		bool eos_received = 0;
 		int nw = 0, max_nw = 0, busy = 0;
 		std::deque<int>* ready;
@@ -307,7 +301,7 @@ class Emitter: public ff_monode_t<long> {
 		std::unordered_map<int, long> ts_active_nw;
 		long ts_goal = 1, ts_lower_bound = 1, ts_upper_bound = 1, onthefly = 0;
 		long pos = 0, sliding_size = 1, acc = 1;
-		long emitter_service_time = 1;
+		long emitter_service_time = 1, collector_service_time = 1;
 		std::queue<int>* nw_series;
 
 		std::chrono::high_resolution_clock::time_point start_time, end_time;
@@ -393,12 +387,12 @@ int main(int argc, char* argv[]) {
 	ff_autonomic_farm.add_workers(W);
 	ff_autonomic_farm.cleanup_workers();
 
-	Collector C;
-	Emitter E(max_nw, nw, ts_goal, sliding_size, &C); 
-
+	Emitter E(max_nw, nw, ts_goal, sliding_size); 
 	ff_autonomic_farm.remove_collector();
 	ff_autonomic_farm.add_emitter(&E); 
 	ff_autonomic_farm.wrap_around();
+
+	Collector C;
 	ff_autonomic_farm.add_collector(&C);
 	ff_autonomic_farm.wrap_around();
 
