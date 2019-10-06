@@ -19,7 +19,7 @@ and 8L in the third part) and the task collection execution time is considerably
 to reconfigure the farm.
 
 ## To test Pthread and FastFlow implementation
-run the ./tests.sh
+ru ./tests.sh
 
 ## To run Pthread implementation:
 cd ./Pthread make
